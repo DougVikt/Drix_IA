@@ -1,0 +1,33 @@
+# MODO DE OPERACAO (local | api)
+operation:
+  mode: "local"                    # local = usa modelo local | api = usa nuvem
+  api_key: "SUA_CHAVE_AQUI"          # Preencha se usar mode: "api"
+  api_provider: "openai"             # openai | anthropic | google
+
+# PERMISSOES NO PC HOSPEDEIRO
+security:
+  allow_host_read: true              # Permite IA ler arquivos fora do HD?
+  allow_host_write: false            # Permite IA escrever fora do HD?
+  allowed_folders:                   # Pastas que a IA pode acessar no PC
+    - "C:/Users/Public/Documents"
+    - "C:/Users/lorddoug/Desktop"        # Ajuste conforme seu PC
+  # Caminhos fora desta lista serao BLOQUEADOS pela IA
+
+# APRENDIZADO CONTINUO (RAG)
+brain:
+  lessons_folder: "./data/lessons"   # Pasta onde colocar PDFs/TXTs
+  memory_db: "./data/vector_db"      # Banco vetorial (memoria persistente)
+  local_model: "qwen2.5:7b"          # Ajuste conforme sua RAM (veja Fase 4.4)
+  chunk_size: 1000                   # Tamanho do "pedaco" de cada licao
+  auto_scan: true                    # Aprender automaticamente ao detectar novo arquivo
+
+# SKILLS HABILITADAS
+skills:
+  generate_images: false             # Gerar imagens com Stable Diffusion / DALL-E
+  transcribe_audio: false            # Transcricao de audio com Whisper
+  speak_responses: false             # IA responder com voz (TTS)
+  host_automation: false             # Automacao de mouse/teclado no PC
+
+# RECURSOS LOCAIS
+local_resources:
+  use_gpu: true                      # Tentar usar GPU do PC hospedeiro se disponivel
