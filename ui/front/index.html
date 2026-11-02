@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Drix· Assistente de IA</title>
+  <link rel="stylesheet" href="./style.css">
+
+</head>
+
+<body>
+  <div class="app" data-od-id="app">
+
+    <header class="topbar" data-od-id="topbar">
+      <div class="topbar-left">
+        <button class="brand" id="brandBtn" aria-label="Drix">
+          <span class="brand-mark">
+            <svg class="ic" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+            </svg>
+          </span>
+          <span class="brand-name">Drix</span>
+        </button>
+        <div class="model-picker">
+          <button class="model-trigger" id="modelTrigger" aria-haspopup="listbox">
+            <svg class="ic ic-sm" viewBox="0 0 24 24" fill="currentColor" style="color: var(--muted);">
+              <path d="M12 2l2.2 6.1 6.1 2.2-6.1 2.2L12 18.6 9.8 12.5 3.7 10.3l6.1-2.2z" opacity=".55" />
+            </svg>
+            <span class="model-name" id="modelName">Carregando…</span>
+            <svg class="ic ic-sm model-chevy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          <div class="model-menu" id="modelMenu" role="listbox">
+          </div>
+        </div>
+        <button class="icon-btn" id="themeBtn" aria-label="Alternar tema" title="Alternar tema">
+          <svg class="ic" id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <circle cx="12" cy="12" r="4.2" />
+            <path
+              d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" />
+          </svg>
+          <svg class="ic" id="iconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+          </svg>
+        </button>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" id="railToggle" aria-label="Abrir o painel" title="Abrir o painel">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <path d="M15 4v16" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="shell" id="shell">
+      <main class="chat" id="chat" data-view="welcome">
+        <section class="welcome" data-od-id="welcome">
+          <div class="welcome-inner">
+            <p class="eyebrow">Drix — assistente de IA</p>
+            <h1>O que você quer explorar hoje?</h1>
+            <p class="welcome-sub">Pergunte, cole um texto ou escolha um ponto de partida. A Drix se adapta ao seu
+              ritmo.</p>
+            <div class="sugg-grid">
+              <button class="sugg"
+                data-prompt="Preciso de um resumo executivo para o lançamento do app de estudos que estamos desenvolvendo.">
+                <span class="sugg-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="1.6">
+                    <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M14 3h5a2 2 0 0 1 2 2v4M3 12h6l2-3 3 6 2-3h5" />
+                  </svg></span>
+                <span class="sugg-text"><strong>Resumo executivo</strong><em>Plano e metas em poucos
+                    parágrafos</em></span>
+              </button>
+              <button class="sugg" data-prompt="Sim, transforme isso em um one-pager de uma página.">
+                <span class="sugg-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="1.6">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 3v5h5M9 13h6M9 17h4" />
+                  </svg></span>
+                <span class="sugg-text"><strong>One-pager</strong><em>Resumo do produto em uma página</em></span>
+              </button>
+              <button class="sugg" data-prompt="Monte um plano de 90 dias para o lançamento do app de estudos.">
+                <span class="sugg-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="1.6">
+                    <rect x="3" y="4" width="18" height="17" rx="2" />
+                    <path d="M3 9h18M8 2v4M16 2v4" />
+                  </svg></span>
+                <span class="sugg-text"><strong>Plano de 90 dias</strong><em>Roteiro de lançamento com metas</em></span>
+              </button>
+              <button class="sugg" data-prompt="Escreva um e-mail de divulgação para o lançamento do app de estudos.">
+                <span class="sugg-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="1.6">
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <path d="M3 7l9 6 9-6" />
+                  </svg></span>
+                <span class="sugg-text"><strong>E-mail de divulgação</strong><em>Comunicado para a lista de
+                    contatos</em></span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="thread" id="thread" data-od-id="thread" aria-live="polite">
+        </section>
+
+        <section class="composer-wrap" data-od-id="composer">
+          <div class="composer">
+            <div class="attach-chip" id="attachChip" hidden>
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M21 11.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8L13.6 3.4a3.8 3.8 0 1 1 5.4 5.4l-8.5 8.4" />
+              </svg>
+              <span class="attach-chip-name" id="attachChipName"></span>
+              <button class="attach-chip-rm" id="attachChipRemove" aria-label="Remover anexo">
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+            <textarea id="composer" rows="1" placeholder="Mensagem para a Drix…" aria-label="Mensagem"></textarea>
+            <div class="composer-bar">
+              <div class="attach-wrap">
+                <button class="icon-btn" id="attachBtn" aria-label="Anexar arquivo" title="Anexar arquivo"
+                  aria-haspopup="menu">
+                  <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                    <path d="M21 11.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8L13.6 3.4a3.8 3.8 0 1 1 5.4 5.4l-8.5 8.4" />
+                  </svg>
+                </button>
+                <div class="attach-menu" id="attachMenu" hidden role="menu" aria-label="Tipos de arquivo">
+                  <p class="attach-label">Anexar arquivo</p>
+                  <button class="attach-item" data-file="relatorio.pdf" role="menuitem">
+                    <span class="attach-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.6">
+                        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                        <path d="M14 3v5h5M9 13h6M9 17h4" />
+                      </svg></span>
+                    <span class="attach-txt"><strong>Documento</strong><em>PDF, DOCX, TXT…</em></span>
+                  </button>
+                  <button class="attach-item" data-file="imagem.png" role="menuitem">
+                    <span class="attach-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.6">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <circle cx="8.5" cy="9.5" r="1.8" />
+                        <path d="M21 16l-5-5-9 9" />
+                      </svg></span>
+                    <span class="attach-txt"><strong>Imagem</strong><em>PNG, JPG, SVG…</em></span>
+                  </button>
+                  <button class="attach-item" data-file="apresentacao.mp4" role="menuitem">
+                    <span class="attach-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.6">
+                        <rect x="3" y="5" width="18" height="14" rx="2" />
+                        <path d="M10 9l5 3-5 3z" />
+                      </svg></span>
+                    <span class="attach-txt"><strong>Vídeo</strong><em>MP4, MOV…</em></span>
+                  </button>
+                  <button class="attach-item" data-file="nota.mp3" role="menuitem">
+                    <span class="attach-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.6">
+                        <path d="M9 18V6l10-2v12" />
+                        <circle cx="6" cy="18" r="3" />
+                        <circle cx="16" cy="16" r="3" />
+                      </svg></span>
+                    <span class="attach-txt"><strong>Áudio</strong><em>MP3, WAV…</em></span>
+                  </button>
+                  <button class="attach-item" data-file="codigo.js" role="menuitem">
+                    <span class="attach-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.6">
+                        <path d="M8 9l-4 3 4 3M16 9l4 3-4 3M13 5l-2 14" />
+                      </svg></span>
+                    <span class="attach-txt"><strong>Código</strong><em>JS, PY, TS…</em></span>
+                  </button>
+                  <button class="attach-item" data-file="" role="menuitem">
+                    <span class="attach-ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.6">
+                        <path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5" />
+                        <path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5" />
+                      </svg></span>
+                    <span class="attach-txt"><strong>Da nuvem</strong><em>Drive, Dropbox…</em></span>
+                  </button>
+                </div>
+              </div>
+              <span class="composer-hint">Enter para enviar · Shift+Enter para nova linha</span>
+              <span class="composer-limit" id="composerCount" aria-live="polite">0 / 4 000</span>
+              <button class="send" id="sendBtn" aria-label="Enviar" disabled>
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p class="composer-error" id="composerError" hidden>Limite de 4 000 caracteres excedido. Apague parte da
+            mensagem para enviar.</p>
+        </section>
+
+      </main>
+
+      <aside class="rail" id="rail" data-od-id="rail">
+        <button class="rail-close" id="railClose" aria-label="Fechar o painel" title="Fechar o painel">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+        </button>
+        <div class="rail-inner">  
+          <div class="rail-body">
+            <button class="rail-newchat" id="newChatBtn">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Novo chat
+            </button>
+            <div class="panel-head"><span class="panel-title">Histórico</span></div>
+            <div class="panel-search">
+              <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M21 21l-4.3-4.3" />
+              </svg>
+              <input id="historySearch" type="text" placeholder="Buscar conversas…" aria-label="Buscar conversas" />
+            </div>
+            <div class="hist-groups" id="histGroups"></div>
+            <p class="panel-empty" id="histEmpty" hidden>Nenhuma conversa encontrada.</p>
+          </div>
+
+          <div class="rail-foot">
+            <button class="rail-settings" id="settingsBtn" aria-haspopup="dialog">
+              <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" />
+              </svg>
+              <span>Configurações</span>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <button class="rail-ghost" id="railGhost" aria-label="Abrir o painel">
+        <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M15 6l-6 6 6 6" />
+        </svg>
+        Histórico
+      </button>
+      <div class="scrim" id="scrim"></div>
+    </div>
+
+  </div>
+
+  <div class="modal-overlay" id="settingsModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-head">
+        <h3 id="settingsTitle">Configurações</h3>
+        <button class="icon-btn" id="settingsClose" aria-label="Fechar configurações">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="setting">
+          <div class="setting-row">
+            <div>
+              <p class="setting-name">Tema</p>
+              <p class="setting-desc">Claro ou escuro para toda a interface.</p>
+            </div>
+            <label class="switch" aria-label="Alternar tema">
+              <input type="checkbox" id="themeSwitch" />
+              <span class="track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-row">
+            <div>
+              <p class="setting-name">Respostas em tempo real</p>
+              <p class="setting-desc">Mostra o texto enquanto a IA escreve.</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" checked />
+              <span class="track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-row">
+            <div>
+              <p class="setting-name">Usar contexto da conversa</p>
+              <p class="setting-desc">Lembra das mensagens anteriores da thread.</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" checked />
+              <span class="track"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="field">
+            <span class="setting-name">Idioma das respostas</span>
+            <select class="input">
+              <option selected>Português (Brasil)</option>
+              <option>English</option>
+              <option>Español</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-foot">
+          <p class="hist-label">Dados</p>
+          <p class="setting-desc">Seus dados são processados na União Europeia. Histórico exportável em JSON.</p>
+        </div>
+      </div>
+  </div>
+</div>
+
+<script>window.__DRIX_KEY__ = '__DRIX_KEY__';</script>
+<script src="./script.js"></script>
+</body>
+
+</html>
