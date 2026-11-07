@@ -1,36 +1,36 @@
-# Identifica o comando principal e os argumentos
+﻿# Identifica o comando principal e os argumentos
 COMMAND    := $(firstword $(MAKECMDGOALS))
 ARG := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 
-# Silencia os argumentos para o Make 3.81 não tentar executá-los
+# Silencia os argumentos para o Make 3.81 nÃ£o tentar executÃ¡-los
 $(eval $(ARGUMENTOS):;@:)
 
-# Variáveis
-PYTHON = poetry run python
+# VariÃ¡veis
+PYTHON = .venv\\Scripts\\python.exe
 OLLAMA = ./ia_system/engine/ollama.exe
-SHELL = cmd.exe   # Necessário para make.exe do GnuWin32 no Windows
+SHELL = cmd.exe   # NecessÃ¡rio para make.exe do GnuWin32 no Windows
 
 .PHONY: help install run learn shell clean ui setup-media backup logs status web dump
 
 help:
-	@echo "Comandos disponíveis para IA Portátil:"
-	@echo "  make install     	- Instala dependências via Poetry"
-	@echo "  make add ARG   	- Adiciona dependências via Poetry"
-	@echo "  make remove ARG	- Remove dependências via Poetry"
-	@echo "  make info ARG		- Lista versões das dependências(ARG para especifico)"
-	@echo "  make up			- Atualiza dependências contidas no Poetry"
+	@echo "Comandos disponiveis para IA Portatil:"
+	@echo "  make install     	- Instala dependencias via Poetry"
+	@echo "  make add ARG   	- Adiciona dependencias via Poetry"
+	@echo "  make remove ARG	- Remove dependencias via Poetry"
+	@echo "  make info ARG		- Lista versoes das dependencias(ARG para especifico)"
+	@echo "  make up			- Atualiza dependencias contidas no Poetry"
 	@echo "  make run         	- Inicia a IA em modo chat (terminal)"
 	@echo "  make web         	- Inicia interface web (FastAPI)"
-	@echo "  make ui          	- Inicia a interface gráfica (CustomTkinter)"
-	@echo "  make learn       	- Força atualização do aprendizado (RAG)"
+	@echo "  make ui          	- Inicia a interface grafica (CustomTkinter)"
+	@echo "  make learn       	- Forca atualizacao do aprendizado (RAG)"
 	@echo "  make backup      	- Faz backup do banco vetorial"
-	@echo "  make logs        	- Mostra os logs da sessão atual"
+	@echo "  make logs        	- Mostra os logs da sessao atual"
 	@echo "  make sync       	- Sincroniza config, modelos, skills e dump"
 	@echo "  make status      	- Mostra status do sistema"
 	@echo "  make shell       	- Abre terminal do Poetry no HD"
 	@echo "  make clean       	- Limpa caches e .venv"
 	@echo "  make dump        	- Atualiza o dump cumulativo da Drix"
-	@echo "  make setup-media 	- Baixa modelos de imagem/áudio"
+	@echo "  make setup-media 	- Baixa modelos de imagem/audio"
 
 add:
 	@echo Adicionando dependencia....
@@ -47,16 +47,16 @@ install:
 	poetry install
 
 run:
-	$(PYTHON) core/main.py --interface
+	.venv\\Scripts\\python.exe -m core.main --interface
 
 web:
 	$(PYTHON) -m ui.web_app
 
 ui:
-	poetry run python -m ui.app
+	.venv\\Scripts\\python.exe -m ui.app
 
 learn:
-	$(PYTHON) core/main.py --update-db
+	.venv\\Scripts\\python.exe -m core.main --update-db
 
 dump:
 	$(PYTHON) scripts/update_dump.py "Manual dump update"
