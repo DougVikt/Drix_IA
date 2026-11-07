@@ -70,6 +70,10 @@ class AuthMiddleware:
         return any(p.startswith(prefix) for prefix in self.protected)
 
     def _rate_limited(self, ip: str, path: str) -> bool:
+        # The UI polls runtime status every second; it is lightweight and must
+        # never be throttled or the page would think the service had stopped.
+        if path.rstrip("/") == "/api/runtime":
+            return False
         limit = self.chat_rate_limit if path.rstrip("/") == "/api/chat" else self.rate_limit
         if limit <= 0:
             return False
@@ -119,5 +123,6 @@ class AuthMiddleware:
             return JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
 
         resp = await call_next(request)
-        logs.info(f"API {request.method} {path} -> {resp.status_code} ip={ip}")
+        if path.rstrip("/") != "/api/runtime":
+            logs.info(f"API {request.method} {path} -> {resp.status_code} ip={ip}")
         return resp

@@ -50,6 +50,187 @@ def _clean_text(value, max_len):
     return value
 
 
+def _sse_token(token) -> str:
+    """Guarantee SSE only ever carries plain text tokens."""
+    if isinstance(token, str):
+        return token
+    if isinstance(token, dict):
+        for key in ("t", "text", "content"):
+            value = token.get(key)
+            if isinstance(value, str):
+                return value
+    if token:
+        logs.warn(f"SSE dropped non-text token: {type(token).__name__}")
+    return ""
+
+
+# ─── Configurações editáveis pela web ────────────────────────
+# Only the keys listed here can be changed from the browser.  Engine, web and
+# security internals stay out unless explicitly added below.
+_SETTINGS_BOOL = {
+    "history.enabled",
+    "compaction.enabled",
+    "compaction.use_llm",
+    "engine.preload",
+    "engine.watchdog",
+    "engine.auto_start",
+    "brain.auto_scan",
+    "brain.auto_select_model",
+    "local_resources.use_gpu",
+    "memory.infer",
+    "memory.consolidate.enabled",
+    "memory.consolidate.use_llm",
+    "network.allow_internet_access",
+    "network.block_local_network",
+    "tools.enabled",
+    "skills.allow_self_create",
+    "skills.speak_responses",
+    "skills.transcribe_audio",
+    "skills.audio_skill",
+    "skills.automation_skill",
+    "skills.host_automation",
+    "skills.generate_images",
+    "skills.image_gen_skill",
+    "skills.generate_video",
+    "skills.video_skill",
+    "skills.vision_skill",
+    "agents.enabled",
+    "security.allow_host_read",
+    "security.allow_host_write",
+    "snapshots.enabled",
+    "mcp.enabled",
+    "web.auto_open",
+    "web.indicator",
+}
+
+_SETTINGS_INT = {
+    "history.max_conversations": (1, 1000),
+    "compaction.keep_recent": (0, 100),
+    "compaction.max_tokens": (100, 16000),
+    "engine.watchdog_interval": (1, 60),
+    "brain.chunk_size": (100, 8000),
+    "brain.model_params.ctx": (512, 32768),
+    "brain.model_params.threads": (1, 64),
+    "snapshots.max": (1, 200),
+    "memory.consolidate.idle_minutes": (1, 1440),
+    "memory.consolidate.interval_minutes": (1, 1440),
+    "memory.consolidate.batch_size": (1, 50),
+    "memory.consolidate.min_entries": (1, 500),
+    "memory.consolidate.keep_recent": (0, 100),
+    "memory.consolidate.max_batches_per_run": (1, 20),
+    "memory.consolidate.max_tokens": (32, 4096),
+    "memory.consolidate.retry_hours": (0, 720),
+    "memory.block_ttl_minutes": (0, 1440),
+    "network.request_timeout": (1, 300),
+    "tools.max_steps": (1, 50),
+}
+
+_SETTINGS_FLOAT = {
+    "memory.inject_min_score": (0.0, 1.0),
+    "memory.search_timeout": (0.1, 120.0),
+    "memory.context_timeout": (0.1, 120.0),
+}
+
+_SETTINGS_ENUM = {
+    "language": {"pt", "en", "es", "fr"},
+    "tools.default_permission": {"allow", "ask", "deny"},
+}
+
+_SETTINGS_LIST = {
+    "network.allowed_domains",
+    "security.allowed_folders",
+}
+
+_SETTINGS_KEYS = (
+    _SETTINGS_BOOL | set(_SETTINGS_INT) | set(_SETTINGS_FLOAT)
+    | set(_SETTINGS_ENUM) | _SETTINGS_LIST | {"engine.keep_alive"}
+)
+
+
+def _coerce_setting(key: str, value):
+    """Validate/convert one setting. Returns (ok, coerced, error)."""
+    if key == "engine.keep_alive":
+        if isinstance(value, bool) or value is None:
+            return False, None, "valor inválido"
+        if isinstance(value, (int, float)):
+            return True, int(value), None
+        text = str(value).strip()
+        if not text:
+            return True, "30m", None
+        if text.lstrip("-").isdigit():
+            return True, int(text), None
+        return True, text[:32], None
+
+    if key in _SETTINGS_BOOL:
+        if isinstance(value, str):
+            return True, value.strip().lower() in {"1", "true", "yes", "on", "sim"}, None
+        return True, bool(value), None
+
+    if key in _SETTINGS_INT:
+        low, high = _SETTINGS_INT[key]
+        try:
+            if isinstance(value, bool) or value is None or str(value).strip() == "":
+                raise ValueError
+            number = int(float(value))
+        except (TypeError, ValueError):
+            return False, None, "valor numérico inválido"
+        if not low <= number <= high:
+            return False, None, f"use um valor entre {low} e {high}"
+        return True, number, None
+
+    if key in _SETTINGS_FLOAT:
+        low, high = _SETTINGS_FLOAT[key]
+        try:
+            if isinstance(value, bool) or value is None or str(value).strip() == "":
+                raise ValueError
+            number = float(value)
+        except (TypeError, ValueError):
+            return False, None, "valor numérico inválido"
+        if not low <= number <= high:
+            return False, None, f"use um valor entre {low} e {high}"
+        return True, number, None
+
+    if key in _SETTINGS_ENUM:
+        text = str(value or "").strip().lower()
+        if text not in _SETTINGS_ENUM[key]:
+            allowed = ", ".join(sorted(_SETTINGS_ENUM[key]))
+            return False, None, f"use um destes valores: {allowed}"
+        return True, text, None
+
+    if key in _SETTINGS_LIST:
+        if isinstance(value, str):
+            items = value.replace(",", "\n").splitlines()
+        elif isinstance(value, list):
+            items = value
+        else:
+            return False, None, "envie uma lista de valores"
+        cleaned = []
+        for item in items:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            if len(text) > 500:
+                return False, None, "cada item deve ter no máximo 500 caracteres"
+            cleaned.append(text)
+        if len(cleaned) > 200:
+            return False, None, "máximo de 200 itens"
+        return True, cleaned, None
+
+    return False, None, "configuração não editável"
+
+
+def _settings_snapshot() -> dict:
+    values = {}
+    for key in sorted(_SETTINGS_KEYS):
+        value = config.get(*key.split("."), default=None)
+        values[key] = value
+    perms = config.get("tools", "permissions", default={}) or {}
+    if isinstance(perms, dict):
+        for name, value in perms.items():
+            values[f"tools.permissions.{name}"] = value
+    return values
+
+
 # ─── Engine ──────────────────────────────────────────────────
 
 @router.get("/engine")
@@ -169,23 +350,43 @@ async def chat(req: Request):
 
     if stream:
         async def _event_stream():
-            async with _chat_lock:
-                conv_mgr.set_workspace(workspace)
-                try:
-                    async for token in ask_stream(text, conv_mgr):
-                        yield f"data: {token}\n\n"
-                    yield "data: [DONE]\n\n"
-                except Exception as e:
-                    yield f"data: Error: {e}\n\n"
-        return StreamingResponse(_event_stream(), media_type="text/event-stream")
+            runtime.chat_begin()
+            try:
+                async with _chat_lock:
+                    conv_mgr.set_workspace(workspace)
+                    try:
+                        async for token in ask_stream(text, conv_mgr):
+                            token = _sse_token(token)
+                            if not token:
+                                continue
+                            # JSON keeps newlines and quotes intact inside SSE.
+                            yield "data: " + json.dumps(
+                                {"t": token}, ensure_ascii=False
+                            ) + "\n\n"
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        yield "data: " + json.dumps(
+                            {"error": str(e)}, ensure_ascii=False
+                        ) + "\n\n"
+            finally:
+                runtime.chat_end()
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
-    async with _chat_lock:
-        conv_mgr.set_workspace(workspace)
-        try:
-            resp = await ask(text, conv_mgr)
-            return {"text": resp, "type": "ai", "model": config.get("brain", "local_model", default="")}
-        except Exception as e:
-            return {"text": f"Error: {e}", "type": "system"}
+    runtime.chat_begin()
+    try:
+        async with _chat_lock:
+            conv_mgr.set_workspace(workspace)
+            try:
+                resp = await ask(text, conv_mgr)
+                return {"text": resp, "type": "ai", "model": config.get("brain", "local_model", default="")}
+            except Exception as e:
+                return {"text": f"Error: {e}", "type": "system"}
+    finally:
+        runtime.chat_end()
 
 
 # ─── Models ──────────────────────────────────────────────────
@@ -221,7 +422,19 @@ async def select_model(req: Request):
     ok, err = config.set("brain.local_model", name)
     if not ok:
         return JSONResponse({"detail": err}, status_code=400)
+    # Load the newly selected model in the background; the first message
+    # should not pay the 40-90 s cold-load cost.
+    asyncio.create_task(asyncio.to_thread(api_engine.preload_model, name))
     return {"status": "selected", "name": name}
+
+@router.post("/models/preload")
+async def preload_model(req: Request):
+    body = await req.json()
+    name = _clean_name(body.get("name", ""), max_len=200, extra_chars=":")
+    if not name:
+        return JSONResponse({"detail": "Name required or invalid"}, status_code=400)
+    ok = await asyncio.to_thread(api_engine.preload_model, name)
+    return {"model": name, "preloaded": bool(ok)}
 
 @router.delete("/models/{name:path}")
 async def delete_model(name: str):
@@ -242,11 +455,18 @@ async def delete_model(name: str):
 async def memory_search(req: Request):
     body = await req.json()
     query = _clean_text(body.get("query", ""), 2000)
-    limit = min(body.get("limit", 5), 50)
+    try:
+        limit = int(body.get("limit", 5) or 5)
+    except (TypeError, ValueError):
+        limit = 5
+    limit = max(1, min(limit, 50))
     if not query:
         return JSONResponse({"detail": "Query required or too long"}, status_code=400)
     try:
         import core.memory as mem
+        if body.get("scored"):
+            items = await asyncio.to_thread(mem.search_scored, query, limit, 0.0)
+            return {"results": items[:limit], "count": len(items)}
         from core.main import _search_memories
         results = await asyncio.to_thread(_search_memories, query)
         return {"results": results[:limit], "count": len(results)}
@@ -258,7 +478,8 @@ async def memory_all():
     try:
         import core.memory as mem
         all_mem = await asyncio.to_thread(mem.get_all)
-        return {"memories": all_mem, "count": len(all_mem)}
+        items = all_mem.get("results", []) if isinstance(all_mem, dict) else all_mem
+        return {"memories": items, "count": len(items)}
     except Exception as e:
         return JSONResponse({"detail": str(e)}, status_code=500)
 
@@ -267,7 +488,32 @@ async def memory_reset():
     try:
         import core.memory as mem
         mem.reset()
+        from core.main import _invalidate_memory_cache
+        _invalidate_memory_cache()
         return {"status": "reset"}
+    except Exception as e:
+        return JSONResponse({"detail": str(e)}, status_code=500)
+
+
+@router.get("/memory/consolidation")
+async def memory_consolidation_status():
+    try:
+        import core.memory_maintenance as maintenance
+        return await asyncio.to_thread(maintenance.status)
+    except Exception as e:
+        return JSONResponse({"detail": str(e)}, status_code=500)
+
+
+@router.post("/memory/consolidation/run")
+async def memory_consolidation_run(req: Request):
+    body = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+    try:
+        import core.memory_maintenance as maintenance
+        return maintenance.request_now(force=bool(body.get("force", False)))
     except Exception as e:
         return JSONResponse({"detail": str(e)}, status_code=500)
 
@@ -331,7 +577,7 @@ async def system_status():
     import core.hardware as hardware
     hw = hardware.analyze()
     return {
-        "version": "1.0",
+        "version": "0.1.0",
         "mode": config.get("operation", "mode", default="local"),
         "engine_running": api_engine.port_in_use(),
         "hardware": {
@@ -402,6 +648,29 @@ async def providers_config(req: Request):
             updates["operation.max_tokens"] = int(body["max_tokens"])
         except (TypeError, ValueError):
             return JSONResponse({"detail": "max_tokens inválido"}, status_code=400)
+    if "timeout" in body:
+        try:
+            timeout = float(body["timeout"])
+        except (TypeError, ValueError):
+            return JSONResponse({"detail": "timeout inválido"}, status_code=400)
+        if not 5 <= timeout <= 600:
+            return JSONResponse({"detail": "timeout deve ficar entre 5 e 600 segundos"},
+                                status_code=400)
+        updates["operation.timeout"] = timeout
+    if "keep_alive" in body:
+        raw = body.get("keep_alive")
+        if isinstance(raw, bool) or raw is None:
+            return JSONResponse({"detail": "keep_alive inválido"}, status_code=400)
+        if isinstance(raw, (int, float)):
+            updates["operation.keep_alive"] = int(raw)
+        else:
+            text = str(raw).strip()
+            if not text:
+                updates["operation.keep_alive"] = "30m"
+            elif text.lstrip("-").isdigit():
+                updates["operation.keep_alive"] = int(text)
+            else:
+                updates["operation.keep_alive"] = text[:32]
     if "fallback_local" in body:
         updates["operation.fallback_local"] = bool(body["fallback_local"])
 
@@ -427,11 +696,98 @@ async def providers_delete_key(provider: str):
     return {"deleted": removed, "provider": provider}
 
 
+# ─── Settings (painel web) ───────────────────────────────────
+
+@router.get("/settings")
+async def get_settings():
+    return {
+        "settings": _settings_snapshot(),
+        "editable": sorted(_SETTINGS_KEYS),
+        "language": lang.current(),
+        "engine": {
+            "host": config.get("engine", "host", default="127.0.0.1"),
+            "port": config.get("engine", "port", default=11434),
+            "auto_start": config.get("engine", "auto_start", default=True),
+        },
+    }
+
+
+@router.post("/settings")
+async def update_settings(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"detail": "Corpo inválido"}, status_code=400)
+
+    incoming = body.get("settings") if isinstance(body, dict) else None
+    if not isinstance(incoming, dict) or not incoming:
+        return JSONResponse({"detail": "Nenhuma configuração enviada"}, status_code=400)
+    if len(incoming) > 100:
+        return JSONResponse({"detail": "Configurações demais em uma só requisição"},
+                            status_code=400)
+
+    updates = {}
+    errors = {}
+    for key, raw in incoming.items():
+        key = str(key or "").strip()
+        if key.startswith("tools.permissions.") and key.count(".") == 2:
+            tool_name = key.rsplit(".", 1)[1]
+            if not re.fullmatch(r"[A-Za-z0-9_\-]{1,60}", tool_name):
+                errors[key] = "nome de ferramenta inválido"
+                continue
+            ok, value, error = _coerce_setting("tools.default_permission", raw)
+            if not ok:
+                errors[key] = error
+                continue
+            updates[key] = value
+            continue
+        if key not in _SETTINGS_KEYS:
+            errors[key or "?"] = "configuração não editável"
+            continue
+        ok, value, error = _coerce_setting(key, raw)
+        if not ok:
+            errors[key] = error
+            continue
+        updates[key] = value
+
+    if errors:
+        return JSONResponse(
+            {"detail": "Alguns valores são inválidos", "errors": errors},
+            status_code=400,
+        )
+    if not updates:
+        return {"status": "unchanged", "updated": []}
+
+    ok, err = config.set_many(updates, force=True)
+    if not ok:
+        return JSONResponse({"detail": err or "Falha ao salvar"}, status_code=400)
+
+    config.reload()
+    if "language" in updates:
+        lang.set_language(updates["language"])
+    if any(key.startswith("memory.") for key in updates):
+        try:
+            from core.main import _invalidate_memory_cache
+            _invalidate_memory_cache()
+        except Exception:
+            pass
+
+    logs.info(f"Settings updated: {', '.join(sorted(updates))}")
+    return {
+        "status": "saved",
+        "updated": sorted(updates),
+        "settings": _settings_snapshot(),
+    }
+
+
+# ─── Runtime / lifecycle ─────────────────────────────────────
+
+
 # ─── Runtime / lifecycle ─────────────────────────────────────
 
 @router.get("/runtime")
 async def runtime_state():
-    return runtime.status()
+    return JSONResponse(runtime.status(), headers={"Cache-Control": "no-store"})
 
 
 @router.post("/runtime/indicator")
@@ -456,6 +812,7 @@ async def runtime_stop(req: Request):
         result["indicator"] = "stopped" if runtime.stop_indicator() else "not-running"
     if "web" in targets:
         result["web"] = "stopping"
+        runtime.begin_stop()
         # Respond first, then exit. The lifespan shutdown is skipped on purpose
         # so the engine keeps running unless it was explicitly stopped above.
         threading.Timer(0.6, lambda: os._exit(0)).start()
@@ -494,23 +851,27 @@ async def agent_run(req: Request):
 
     final = ""
     events = []
-    async with _chat_lock:
-        conv_mgr.set_workspace(workspace)
-        async for event in agent.run(
-            text, conv_mgr, workspace=workspace, approvals=approvals, use_tools=use_tools,
-        ):
-            kind = event.get("type")
-            if kind == "final":
-                final = event.get("text") or ""
-            elif kind == "error":
-                return JSONResponse(
-                    {"text": f"Error: {event.get('message')}", "type": "system"},
-                    status_code=500,
-                )
-            elif kind == "approval_required":
-                return JSONResponse(event, status_code=202)
-            elif kind in ("tool_call", "tool_result"):
-                events.append(event)
+    runtime.chat_begin()
+    try:
+        async with _chat_lock:
+            conv_mgr.set_workspace(workspace)
+            async for event in agent.run(
+                text, conv_mgr, workspace=workspace, approvals=approvals, use_tools=use_tools,
+            ):
+                kind = event.get("type")
+                if kind == "final":
+                    final = event.get("text") or ""
+                elif kind == "error":
+                    return JSONResponse(
+                        {"text": f"Error: {event.get('message')}", "type": "system"},
+                        status_code=500,
+                    )
+                elif kind == "approval_required":
+                    return JSONResponse(event, status_code=202)
+                elif kind in ("tool_call", "tool_result"):
+                    events.append(event)
+    finally:
+        runtime.chat_end()
 
     return {
         "text": final,
@@ -528,17 +889,21 @@ async def agent_stream(req: Request):
         return {"text": "", "type": "system"}
 
     async def _events():
-        async with _chat_lock:
-            conv_mgr.set_workspace(workspace)
-            try:
-                async for event in agent.run(
-                    text, conv_mgr, workspace=workspace,
-                    approvals=approvals, use_tools=use_tools,
-                ):
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                yield "data: [DONE]\n\n"
-            except Exception as exc:
-                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        runtime.chat_begin()
+        try:
+            async with _chat_lock:
+                conv_mgr.set_workspace(workspace)
+                try:
+                    async for event in agent.run(
+                        text, conv_mgr, workspace=workspace,
+                        approvals=approvals, use_tools=use_tools,
+                    ):
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                except Exception as exc:
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        finally:
+            runtime.chat_end()
 
     return StreamingResponse(_events(), media_type="text/event-stream")
 

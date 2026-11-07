@@ -229,6 +229,58 @@ def fetch_models() -> list[str]:
     return names
 
 
+def selected_model() -> str:
+    """Model currently selected for the local engine."""
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return str((cfg.get("brain") or {}).get("local_model") or "").strip()
+    except Exception:
+        return ""
+
+
+def preload_model(model: str | None = None, keep_alive: str | int = -1,
+                  timeout: float = 240.0, system: str = "") -> bool:
+    """Load the chat model into RAM before the first user message.
+
+    Loading a 2-4 GB model from the external HD takes 40-90 s on this
+    hardware.  Doing it while the page is still opening removes that wait
+    from the first answer.
+    """
+    if not port_in_use():
+        return False
+    name = (model or selected_model()).strip()
+    if not name:
+        return False
+    try:
+        import httpx
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        params = (cfg.get("brain") or {}).get("model_params") or {}
+        options: dict = {"num_predict": 1}
+        if params.get("ctx"):
+            options["num_ctx"] = int(params["ctx"])
+        if params.get("threads"):
+            options["num_thread"] = int(params["threads"])
+        url = f"http://127.0.0.1:{engine_port()}/api/chat"
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": "ok"})
+        payload = {
+            "model": name,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": keep_alive,
+            "options": options,
+        }
+        resp = httpx.post(url, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
 def sync_models() -> None:
     import core.hardware as hardware
 
