@@ -27,9 +27,12 @@ agents:
       - read_file
 brain:
   auto_scan: true
-  auto_select_model: true
+  auto_select_model: false
   chunk_size: 1000
   installed_models:
+  - gemma2:2b
+  - phi3:mini
+  - qwen2:1.5b
   - llama3.2:3b
   - phi3.5:3.8b
   - tinyllama:1.1b
@@ -44,12 +47,15 @@ brain:
     threads: 6
 compaction:
   enabled: true
-  keep_recent: 10
-  max_tokens: 3000
+  keep_recent: 8
+  max_tokens: 2000
+  use_llm: false
 engine:
   auto_start: true
   host: 127.0.0.1
+  keep_alive: -1
   port: 11434
+  preload: true
   watchdog: true
   watchdog_interval: 5
 history:
@@ -62,6 +68,23 @@ local_resources:
 mcp:
   enabled: false
   servers: {}
+memory:
+  block_ttl_minutes: 60
+  consolidate:
+    batch_size: 8
+    enabled: true
+    idle_minutes: 5
+    interval_minutes: 10
+    keep_recent: 6
+    max_batches_per_run: 2
+    max_tokens: 256
+    min_entries: 8
+    retry_hours: 24
+    use_llm: true
+  context_timeout: 4.0
+  infer: false
+  inject_min_score: 0.6
+  search_timeout: 3.5
 network:
   allow_internet_access: true
   allowed_domains: []
@@ -72,19 +95,20 @@ operation:
   api_provider: openai
   base_url: ''
   fallback_local: true
+  keep_alive: -1
   max_tokens: 1024
   mode: local
-  model: gpt-4o-mini
+  model: phi3.5:3.8b
   provider: local
   temperature: 0.7
-  timeout: 120
+  timeout: 120.0
 security:
   allow_host_read: true
   allow_host_write: false
   allowed_folders:
   - '%USERPROFILE%/Desktop'
   - '%USERPROFILE%/Documents'
-  api_key: bb0d0d1078f64f34660e5cd3a9d9779d46afa3f36c22d2a045dc35c4493e6ce3
+  api_key: ""  # use {env:DRIX_SECURITY_API_KEY} ou core.secrets
 skills:
   allow_self_create: false
   audio_skill: true
@@ -111,13 +135,20 @@ tools:
   enabled: true
   max_steps: 6
   permissions:
+    delegate: allow
     fetch_url: allow
     list_directory: allow
+    list_subagents: allow
+    mcp_call: allow
+    mcp_list_tools: allow
+    mcp_servers: allow
     memory_add: allow
     memory_search: allow
     read_file: allow
     run_shell: deny
     search_files: allow
+    snapshot_list: allow
+    snapshot_restore: allow
     system_info: allow
     web_search: allow
     write_file: ask
