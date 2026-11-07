@@ -242,5 +242,8 @@ System Volume Information/
 .chainlit/
 .files/
 
-# Session dump (regenerado a cada conversa)
+# Documentação local de desenvolvimento (não versionar)
+DADOS_DEV/
+
+# Dumps / artefatos locais
 drix_complete_dump.json
