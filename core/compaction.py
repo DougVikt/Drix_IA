@@ -49,6 +49,11 @@ def _heuristic_summary(transcript: str, limit: int = 1500) -> str:
 
 
 async def _summarize(transcript: str) -> str:
+    conf = _cfg(None).get("compaction") or {}
+    if not conf.get("use_llm", True):
+        # Local CPU generation is the bottleneck; a heuristic summary is
+        # instant and avoids adding another full model call before a reply.
+        return _heuristic_summary(transcript)
     messages = [
         {"role": "system", "content": _SUMMARY_PROMPT},
         {"role": "user", "content": transcript[:12000]},
@@ -79,7 +84,19 @@ async def maybe_compact(conv_mgr, workspace: str | None, cfg: dict | None = None
     except (TypeError, ValueError):
         max_tokens, keep_recent = 3000, 10
 
+    previous = conv_mgr.get_summary(workspace)
+    already_covered = 0
+    if previous:
+        try:
+            already_covered = int(previous.get("covered_until") or 0)
+        except (TypeError, ValueError):
+            already_covered = 0
+
     rows = conv_mgr.get_all_history_for(workspace)
+    # Only consider messages that are not in the stored summary yet;
+    # otherwise every turn re-summarises the whole workspace and the
+    # summary keeps growing.
+    rows = [r for r in rows if int(r[0]) > already_covered]
     if not rows:
         return None
 
@@ -95,7 +112,6 @@ async def maybe_compact(conv_mgr, workspace: str | None, cfg: dict | None = None
     covered_until = old_rows[-1][0]
 
     transcript_parts = []
-    previous = conv_mgr.get_summary(workspace)
     if previous and previous.get("summary"):
         transcript_parts.append("Resumo anterior:\n" + previous["summary"])
     transcript_parts.append(

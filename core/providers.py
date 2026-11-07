@@ -106,6 +106,7 @@ class Resolved:
     timeout: float = 120.0
     fallback_local: bool = True
     params: dict = field(default_factory=dict)
+    keep_alive: str | int = "30m"
 
     @property
     def supports_tools(self) -> bool:
@@ -181,6 +182,15 @@ def resolve(cfg=None) -> Resolved:
     except (TypeError, ValueError):
         timeout = 120.0
 
+    # Keep the local model loaded between turns.  Without this Ollama evicts
+    # it after 5 minutes, and the next message pays a 40-90 s cold load from
+    # the external HD.  ``-1`` means "until the engine stops".
+    keep_alive: str | int = op.get("keep_alive", engine.get("keep_alive", "30m"))
+    if isinstance(keep_alive, str):
+        keep_alive = keep_alive.strip() or "30m"
+        if keep_alive.lstrip("-").isdigit():
+            keep_alive = int(keep_alive)
+
     return Resolved(
         provider=provider,
         model=model,
@@ -191,6 +201,7 @@ def resolve(cfg=None) -> Resolved:
         timeout=timeout,
         fallback_local=bool(op.get("fallback_local", True)),
         params=dict(brain.get("model_params") or {}),
+        keep_alive=keep_alive,
     )
 
 
@@ -204,6 +215,8 @@ def describe(cfg=None) -> dict:
         "key_hint": secrets.mask(r.api_key),
         "temperature": r.temperature,
         "max_tokens": r.max_tokens,
+        "timeout": r.timeout,
+        "keep_alive": r.keep_alive,
         "fallback_local": r.fallback_local,
         "encryption": secrets.encryption_mode(),
     }
@@ -416,6 +429,10 @@ def _ollama_options(r: Resolved) -> dict:
         options["num_thread"] = params["threads"]
     options.setdefault("temperature", r.temperature)
     options.setdefault("num_predict", r.max_tokens)
+    # Small local models often continue past the answer and invent a new
+    # "---" section with another question.  Stop at that separator; without
+    # this the reply can be 3-4x longer (and slower) than requested.
+    options.setdefault("stop", ["\n\n---"])
     return options
 
 
@@ -446,6 +463,7 @@ async def _ollama_chat(r: Resolved, messages: list[dict], tools=None) -> dict:
             messages=_ollama_messages(messages),
             options=_ollama_options(r),
             tools=_openai_tools(tools) if tools else None,
+            keep_alive=r.keep_alive,
         )
 
     try:
@@ -465,6 +483,7 @@ async def _ollama_stream(r: Resolved, messages: list[dict]) -> AsyncIterator[str
             messages=_ollama_messages(messages),
             options=_ollama_options(r),
             stream=True,
+            keep_alive=r.keep_alive,
         )
         for chunk in stream:
             text = (chunk.get("message") or {}).get("content") or ""
@@ -672,6 +691,7 @@ def _local_fallback(r: Resolved) -> Resolved:
         timeout=r.timeout,
         fallback_local=False,
         params=dict(brain.get("model_params") or {}),
+        keep_alive=r.keep_alive,
     )
 
 

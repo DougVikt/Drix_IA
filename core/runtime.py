@@ -29,12 +29,52 @@ import psutil
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = ROOT / "data" / "runtime.json"
+STOP_FLAG = ROOT / "data" / "stopping.flag"
 INDICATOR_SCRIPT = ROOT / "scripts" / "indicator.py"
 PYTHON_EXE = ROOT / ".venv" / "Scripts" / "python.exe"
 
 _lock = threading.RLock()
 _heartbeat_stop: threading.Event | None = None
 _heartbeat_thread: threading.Thread | None = None
+
+# Chat activity tracking.  The memory consolidation thread uses this to run
+# only when no answer is being generated, so it never competes with the user.
+_chat_lock = threading.RLock()
+_chat_active = 0
+_chat_last_activity = time.time()
+_chat_last_started = 0.0
+_chat_last_finished = 0.0
+
+
+def chat_begin() -> None:
+    global _chat_active, _chat_last_activity, _chat_last_started
+    with _chat_lock:
+        _chat_active += 1
+        now = time.time()
+        _chat_last_started = now
+        _chat_last_activity = now
+
+
+def chat_end() -> None:
+    global _chat_active, _chat_last_activity, _chat_last_finished
+    with _chat_lock:
+        if _chat_active > 0:
+            _chat_active -= 1
+        now = time.time()
+        _chat_last_finished = now
+        _chat_last_activity = now
+
+
+def chat_state() -> dict:
+    with _chat_lock:
+        now = time.time()
+        return {
+            "active": _chat_active,
+            "idle_seconds": round(max(0.0, now - _chat_last_activity), 1),
+            "last_activity": _chat_last_activity,
+            "last_started": _chat_last_started,
+            "last_finished": _chat_last_finished,
+        }
 
 
 def _now() -> str:
@@ -80,6 +120,28 @@ def unregister(name: str) -> None:
         _write(state)
 
 
+# ─── Stop handshake ─────────────────────────────────────────────
+# The indicator writes this flag before dropping the web server so the page
+# can swap itself for the stopped screen while the server is still alive.
+
+def begin_stop() -> None:
+    STOP_FLAG.parent.mkdir(parents=True, exist_ok=True)
+    STOP_FLAG.write_text(_now(), encoding="utf-8")
+
+
+def clear_stop() -> None:
+    try:
+        STOP_FLAG.unlink()
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+
+def stopping() -> bool:
+    return STOP_FLAG.exists()
+
+
 def heartbeat() -> None:
     with _lock:
         state = _read()
@@ -108,6 +170,13 @@ def pid_alive(pid) -> bool:
         return False
 
 
+def _is_indicator_process(proc) -> bool:
+    try:
+        return "indicator.py" in " ".join(proc.cmdline()).lower()
+    except Exception:
+        return False
+
+
 def _kill_pid(pid, timeout: float = 5.0) -> bool:
     if not pid or int(pid) == os.getpid():
         return False
@@ -117,6 +186,10 @@ def _kill_pid(pid, timeout: float = 5.0) -> bool:
         return False
     try:
         for child in proc.children(recursive=True):
+            # Never kill the desktop indicator while stopping the web server:
+            # it is the process that must report "parado" and close itself last.
+            if _is_indicator_process(child):
+                continue
             try:
                 child.kill()
             except Exception:
@@ -238,6 +311,7 @@ def status() -> dict:
         "engine": {**engine, "running": engine_running},
         "web": web,
         "indicator": indicator,
+        "stopping": stopping(),
         "any_running": bool(engine_running or web.get("port_open") or indicator.get("pid_alive")),
     }
 

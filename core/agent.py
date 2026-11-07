@@ -41,7 +41,9 @@ async def run(query: str, conv_mgr=None, *, workspace: str = "default",
     Event types: ``token``, ``tool_call``, ``tool_result``, ``approval_required``,
     ``final``, ``error``.
     """
-    from .main import _build_prompt, _save_memory, lang
+    from .main import (
+        _build_prompt, _save_memory, _system_text, _workspace_memory_suffix,
+    )
 
     # Register optional tool packs (MCP servers, subagents) on first use.
     try:
@@ -67,7 +69,10 @@ async def run(query: str, conv_mgr=None, *, workspace: str = "default",
     ctx = tools.ToolContext(cfg=cfg, workspace=workspace,
                             approvals=frozenset(approvals), extra={"_depth": depth})
 
-    system = lang.get("system_prompt")
+    system = _system_text()
+    memory = _workspace_memory_suffix(conv_mgr)
+    if memory:
+        system = f"{system}\n\n{memory}"
     if system_extra:
         system = f"{system}\n\n{system_extra}"
 
