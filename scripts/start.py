@@ -60,14 +60,38 @@ print()
 print("  Installed models:")
 if hw["installed_models"]:
     for m in hw["installed_models"]:
-        print(f"    - {m}")
+        marker = " (active)" if m == config.get("brain", {}).get("local_model") else ""
+        print(f"    - {m}{marker}")
 else:
     print("    (none)")
 
+active_model = config.get("brain", {}).get("local_model") or config.get("operation", {}).get("model") or "not set"
+suggested = hw.get("selected_model")
+auto_select = config.get("brain", {}).get("auto_select_model", False)
 print()
-print(f"  Recommended model: {hw['selected_model']}")
+print(f"  Active model:    {active_model}")
+if suggested and suggested != active_model:
+    print(f"  Suggested model: {suggested} (based on hardware)")
+elif suggested and auto_select:
+    print(f"  Suggested model: {suggested} (auto-select enabled)")
+print("  Tip: change the model in config.yaml or in the UI settings.")
 if hw["ram_gb"] < 8:
     print("  (!) Low RAM - expect slower responses")
+
+# Network permissions check (config-driven)
+net = config.get("network", {}) or {}
+net_allow = bool(net.get("allow_internet_access", False))
+net_block_local = bool(net.get("block_local_network", True))
+net_domains = net.get("allowed_domains") or []
+print()
+print("  Network permissions:")
+print(f"    Internet access:   {'ENABLED' if net_allow else 'DISABLED'} (network.allow_internet_access)")
+print(f"    Block local net:   {'ENABLED' if net_block_local else 'DISABLED'} (network.block_local_network)")
+if net_allow:
+    scope = "all domains" if not net_domains else f"{len(net_domains)} allowed domain(s)"
+    print(f"    Allowed scope:     {scope}")
+else:
+    print("    Web tools (search/fetch/MCP remote) require internet access to be enabled.")
 
 print()
 print("  Choose interface:")

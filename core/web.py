@@ -103,6 +103,18 @@ def check_url(url: str, net: dict = None) -> str:
 
 
 def search(query: str, max_results: int = 5) -> list:
+    net = _net_config()
+    # Respect config permission (tools.py also checks; this keeps web.py safe as a standalone API).
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        if not (cfg.get("network") or {}).get("allow_internet_access", False):
+            logs.warn(f"WEB search blocked by config query={query[:200]!r}")
+            return ["Blocked: network.allow_internet_access=false"]
+    except Exception:
+        # If config can't be read, fail closed for safety.
+        logs.warn(f"WEB search blocked (config read error) query={query[:200]!r}")
+        return ["Blocked: unable to verify network permissions"]
     try:
         with DDGS() as ddgs:
             results = [
