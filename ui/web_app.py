@@ -117,7 +117,10 @@ async def root():
         return HTMLResponse("<h1>Drix</h1><p>index.html não encontrado.</p>", status_code=404)
     html = HTML_PATH.read_text(encoding="utf-8")
     # The key is delivered through the HttpOnly cookie, never through the page.
-    html = html.replace("'__DRIX_KEY__'", "''").replace("__DRIX_KEY__", "")
+    html = html.replace(
+        "<script>window.__DRIX_KEY__ = '__DRIX_KEY__';</script>",
+        "<script>window.__DRIX_KEY__ = '';</script>",
+    )
     return _attach_session_cookie(HTMLResponse(html, headers=_NO_STORE))
 
 
