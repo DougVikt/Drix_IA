@@ -23,11 +23,30 @@ import traceback
 import webbrowser
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
+
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("OLLAMA_MODELS", str(ROOT / "ia_system" / "models"))
+
+
+def _ensure_pythonw() -> None:
+    """Reinicia com pythonw.exe se estiver rodando com python.exe (evita console)."""
+    if sys.platform != "win32":
+        return
+    if not sys.executable.lower().endswith("python.exe"):
+        return
+    pythonw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
+    if not pythonw.exists():
+        pythonw = ROOT / ".venv" / "Scripts" / "python.exe"
+    args = [str(pythonw), str(__file__)] + sys.argv[1:]
+    subprocess.Popen(
+        args, cwd=str(ROOT), creationflags=0x08000000,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+    )
+    sys.exit(0)
+
 
 from api import engine  # noqa: E402
 from core import logs, runtime  # noqa: E402
@@ -75,7 +94,61 @@ def _spawn_indicator() -> None:
         logs.info(f"Indicator started (pid {pid})")
 
 
+def _warm_up() -> None:
+    """Load the model and the memory/RAG caches before the first message.
+
+    A cold 3B model takes 40-90 s to load from the external HD; doing it in
+    the background while the page opens removes that wait from the first
+    answer.  Mem0/Chroma initialisation is also moved off the request path.
+    """
+    if not ENGINE.get("preload", True):
+        return
+    model = engine.selected_model()
+    if not model:
+        return
+    started = time.time()
+    keep_alive = ENGINE.get("keep_alive", -1)
+    try:
+        from core import language as lang
+        system = lang.get("system_prompt")
+    except Exception:
+        system = ""
+    if engine.preload_model(model, keep_alive=keep_alive, system=system):
+        # Prime the KV cache for the real system prompt so the first answer
+        # does not have to process it from scratch.
+        engine.preload_model(model, keep_alive=keep_alive, system=system)
+        logs.info(f"Model preloaded: {model} ({time.time() - started:.1f}s)")
+    else:
+        logs.warn(f"Model preload failed: {model}")
+    try:
+        from core import main as core_main
+        core_main.warm_caches()
+        logs.info(f"Memory/context caches warmed ({time.time() - started:.1f}s)")
+    except Exception as exc:
+        logs.warn(f"Cache warmup failed: {exc}")
+
+
+def _restore_front_page() -> None:
+    """Restaura index.html a partir do backup criado pelo 'Parar tudo'."""
+    front = ROOT / "ui" / "front"
+    index = front / "index.html"
+    backup = front / "index.html.bak"
+    if backup.exists():
+        try:
+            if index.exists():
+                index.unlink()
+            backup.rename(index)
+            logs.info("Página inicial restaurada após parada anterior")
+        except Exception as exc:
+            logs.warn(f"Falha ao restaurar index.html: {exc}")
+
+
 def _shutdown(server=None) -> None:
+    try:
+        from core import memory_maintenance
+        memory_maintenance.stop()
+    except Exception:
+        pass
     if server is not None:
         try:
             server.should_exit = True
@@ -91,6 +164,7 @@ def _shutdown(server=None) -> None:
 
 
 def main() -> int:
+    _ensure_pythonw()
     mode = sys.argv[1] if len(sys.argv) > 1 else "web"
     if mode not in ("web", "terminal", "headless"):
         print("usage: service.py [web|terminal|headless]", file=sys.stderr)
@@ -98,6 +172,8 @@ def main() -> int:
 
     logs.setup()
     logs.info(f"Service starting in {mode} mode")
+    _restore_front_page()
+    runtime.clear_stop()
 
     if ENGINE.get("auto_start", True) and not engine.start():
         logs.warn("Engine could not be started")
@@ -112,6 +188,16 @@ def main() -> int:
         interval=float(ENGINE.get("watchdog_interval", 5)),
         restart_engine=bool(ENGINE.get("watchdog", True)),
     )
+
+    if ENGINE.get("preload", True):
+        threading.Thread(target=_warm_up, daemon=True, name="drix-warmup").start()
+
+    try:
+        from core import memory_maintenance
+        memory_maintenance.start()
+        logs.info("Memory consolidation thread started")
+    except Exception as exc:
+        logs.warn(f"Memory consolidation could not start: {exc}")
 
     server = None
     try:
