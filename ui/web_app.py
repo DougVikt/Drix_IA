@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import secrets
+import secrets as pysecrets
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.auth import AuthMiddleware, COOKIE_NAME
 from api.routes import router
-from core import runtime, secrets
+from core import runtime, secrets as drix_secrets
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "config.yaml"
@@ -39,16 +39,16 @@ def _resolve_security_api_key(cfg: dict) -> str:
     if env_key:
         return env_key
     # 2) Secrets store (hidden/protected local file)
-    stored = secrets.get_secret("security:api_key")
-    if secrets.is_real_secret(stored):
+    stored = drix_secrets.get_secret("security:api_key")
+    if drix_secrets.is_real_secret(stored):
         return stored.strip()
     # 3) Config value (supports {env:VAR}; plaintext is legacy/migrated away)
     raw = str((cfg.get("security") or {}).get("api_key", "") or "").strip()
     resolved = _resolve_env_in_str(raw).strip()
-    if secrets.is_real_secret(resolved) and not resolved.startswith("{env:"):
+    if drix_secrets.is_real_secret(resolved) and not resolved.startswith("{env:"):
         # Migrate plaintext legacy key to secrets store, do not keep in config.yaml
         try:
-            secrets.set_secret("security:api_key", resolved)
+            drix_secrets.set_secret("security:api_key", resolved)
             cfg.setdefault("security", {})["api_key"] = ""
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
@@ -56,9 +56,9 @@ def _resolve_security_api_key(cfg: dict) -> str:
             pass
         return resolved
     # 4) Generate and store in secrets store (not config.yaml)
-    api_key = secrets.token_hex(32)
+    api_key = pysecrets.token_hex(32)
     try:
-        secrets.set_secret("security:api_key", api_key)
+        drix_secrets.set_secret("security:api_key", api_key)
     except Exception:
         pass
     return api_key
@@ -68,7 +68,7 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     _raw_config = yaml.safe_load(f) or {}
 
 # Move any plaintext provider key out of config.yaml before serving.
-_migrated = secrets.migrate_from_config(_raw_config)
+_migrated = drix_secrets.migrate_from_config(_raw_config)
 if _migrated:
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(_raw_config, f, default_flow_style=False, allow_unicode=True)
