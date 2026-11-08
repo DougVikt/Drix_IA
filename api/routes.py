@@ -416,10 +416,10 @@ async def select_model(req: Request):
     name = _clean_name(body.get("name", ""), max_len=200, extra_chars=":")
     if not name:
         return JSONResponse({"detail": "Name required or invalid"}, status_code=400)
-    ok, err = config.set("brain.auto_select_model", False)
-    if not ok:
-        return JSONResponse({"detail": err}, status_code=400)
-    ok, err = config.set("brain.local_model", name)
+    ok, err = config.set_many(
+        {"brain.auto_select_model": False, "brain.local_model": name},
+        force=False,
+    )
     if not ok:
         return JSONResponse({"detail": err}, status_code=400)
     # Load the newly selected model in the background; the first message
