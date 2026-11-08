@@ -65,7 +65,8 @@ class Indicator(tk.Tk):
         self.minsize(300, 230)
         self.resizable(False, False)
         self.attributes("-topmost", True)
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self._on_close_requested)
+        self.after(50, self._disable_close_button)
 
         self._logo_icon = self._logo_photo(64)
         if self._logo_icon is not None:
@@ -219,6 +220,39 @@ class Indicator(tk.Tk):
         detail_label.configure(text=detail)
 
     # ─── Actions ─────────────────────────────────────────────
+
+    def _on_close_requested(self):
+        # Evita fechar o painel sem parar os serviços.
+        try:
+            from tkinter import messagebox
+            messagebox.showinfo(
+                "Drix",
+                "Use 'Parar tudo' para encerrar os serviços com segurança.\n"
+                "O painel de serviços não pode ser fechado pelo X.",
+                parent=self,
+            )
+        except Exception:
+            pass
+
+    def _disable_close_button(self):
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            if not hwnd:
+                hwnd = self.winfo_id()
+            GWL_STYLE = -16
+            WS_SYSMENU = 0x00080000
+            WS_MINIMIZEBOX = 0x00020000
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+            # Keep a minimal frame; remove/disable close behavior at protocol level too.
+            style = (style & ~WS_SYSMENU) | WS_MINIMIZEBOX
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+            ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x27)  # refresh frame
+        except Exception:
+            # Fallback: protocol handler already prevents closing.
+            pass
 
     def _open_web(self):
         web = self._snapshot.get("web") or {}
