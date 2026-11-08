@@ -23,6 +23,47 @@ from core import runtime, secrets
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "config.yaml"
 
+
+def _resolve_env_in_str(value):
+    if not isinstance(value, str):
+        return value
+    import re
+    def repl(m):
+        return os.environ.get(m.group(1) or m.group(2) or m.group(3), "")
+    return re.sub(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", repl, value)
+
+
+def _resolve_security_api_key(cfg: dict) -> str:
+    # 1) Environment variable (recommended)
+    env_key = os.environ.get("DRIX_SECURITY_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    # 2) Secrets store (hidden/protected local file)
+    stored = secrets.get_secret("security:api_key")
+    if secrets.is_real_secret(stored):
+        return stored.strip()
+    # 3) Config value (supports {env:VAR}; plaintext is legacy/migrated away)
+    raw = str((cfg.get("security") or {}).get("api_key", "") or "").strip()
+    resolved = _resolve_env_in_str(raw).strip()
+    if secrets.is_real_secret(resolved) and not resolved.startswith("{env:"):
+        # Migrate plaintext legacy key to secrets store, do not keep in config.yaml
+        try:
+            secrets.set_secret("security:api_key", resolved)
+            cfg.setdefault("security", {})["api_key"] = ""
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        except Exception:
+            pass
+        return resolved
+    # 4) Generate and store in secrets store (not config.yaml)
+    api_key = secrets.token_hex(32)
+    try:
+        secrets.set_secret("security:api_key", api_key)
+    except Exception:
+        pass
+    return api_key
+
+
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     _raw_config = yaml.safe_load(f) or {}
 
@@ -32,12 +73,7 @@ if _migrated:
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         yaml.dump(_raw_config, f, default_flow_style=False, allow_unicode=True)
 
-api_key = str(_raw_config.get("security", {}).get("api_key", "") or "")
-if not api_key:
-    api_key = secrets.token_hex(32)
-    _raw_config.setdefault("security", {})["api_key"] = api_key
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(_raw_config, f, default_flow_style=False, allow_unicode=True)
+api_key = _resolve_security_api_key(_raw_config)
 
 WEB_CFG = _raw_config.get("web", {}) or {}
 ENGINE_CFG = _raw_config.get("engine", {}) or {}

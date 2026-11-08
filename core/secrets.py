@@ -137,6 +137,19 @@ def _load() -> dict:
     return data
 
 
+def _hide_windows(path: Path) -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        FILE_ATTRIBUTE_HIDDEN = 0x2
+        FILE_ATTRIBUTE_SYSTEM = 0x4
+        # Hidden is enough for "ocultar"; avoid System to reduce side effects.
+        ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+    except Exception:
+        pass
+
+
 def _save() -> None:
     data = _load()
     SECRETS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -147,6 +160,7 @@ def _save() -> None:
         os.chmod(SECRETS_PATH, 0o600)
     except Exception:
         pass
+    _hide_windows(SECRETS_PATH)
 
 
 def _encode(value: str) -> dict:

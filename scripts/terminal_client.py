@@ -7,10 +7,14 @@ sys.path.insert(0, str(ROOT))
 
 from client.drix_client import DrixClient
 
+import os
 with open(ROOT / "config" / "config.yaml", "r", encoding="utf-8") as _f:
     _cfg = yaml.safe_load(_f) or {}
 _web = _cfg.get("web", {})
-_api_key = _cfg.get("security", {}).get("api_key", "")
+_api_key = os.environ.get("DRIX_SECURITY_API_KEY", "").strip() or str((_cfg.get("security") or {}).get("api_key", "") or "")
+# Support {env:VAR} in legacy config values
+if _api_key.startswith("{env:") and _api_key.endswith("}"):
+    _api_key = os.environ.get(_api_key[5:-1], "")
 _base_url = f"http://{_web.get('host', '127.0.0.1')}:{_web.get('port', 8000)}"
 
 drix = DrixClient(base_url=_base_url, api_key=_api_key)

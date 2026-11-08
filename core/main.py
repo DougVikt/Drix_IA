@@ -8,9 +8,28 @@ if str(_MAIN_ROOT) not in sys.path:
 HD_ROOT = _MAIN_ROOT
 CONFIG_PATH = HD_ROOT / "config" / "config.yaml"
 
+import re
 import yaml
+
+_ENV_PATTERN = re.compile(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _resolve_env_value(value):
+    """Resolve {env:VAR} / ${VAR} / $VAR in strings; recurse into dicts/lists."""
+    if isinstance(value, str):
+        def repl(m):
+            key = m.group(1) or m.group(2) or m.group(3)
+            return os.environ.get(key, "")
+        return _ENV_PATTERN.sub(repl, value)
+    if isinstance(value, dict):
+        return {k: _resolve_env_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_env_value(v) for v in value]
+    return value
+
+
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-    _raw_config = yaml.safe_load(f)
+    _raw_config = yaml.safe_load(f) or {}
 
 import core.logs as logs
 logs.setup()
@@ -41,10 +60,18 @@ _PROTECTED_CONFIG_PREFIXES = (
 )
 
 class ConfigManager:
+    # Keys that must never be persisted as plaintext in config.yaml
+    _SENSITIVE_KEYS = {"security.api_key", "operation.api_key"}
+
     def __init__(self, cfg):
         self._cfg = cfg
 
-    def get(self, *keys, default=None):
+    def get(self, *keys, default=None, resolve=True):
+        # Special handling: security.api_key prefers env var
+        if len(keys) == 2 and keys[0] == "security" and keys[1] == "api_key":
+            env_key = os.environ.get("DRIX_SECURITY_API_KEY", "").strip()
+            if env_key:
+                return env_key
         val = self._cfg
         for k in keys:
             if isinstance(val, dict):
@@ -53,7 +80,7 @@ class ConfigManager:
                 return default
             if val is None:
                 return default
-        return val
+        return _resolve_env_value(val) if resolve else val
 
     def set(self, key_path, value, force=False):
         if not force and self._is_protected(key_path):
@@ -90,10 +117,27 @@ class ConfigManager:
                 return True
         return False
 
+    def _sanitized_for_save(self):
+        """Deep copy with sensitive plaintext values stripped before writing to disk."""
+        import copy
+        data = copy.deepcopy(self._cfg)
+        # Never persist secrets in config.yaml
+        sec = data.get("security")
+        if isinstance(sec, dict):
+            val = sec.get("api_key")
+            if isinstance(val, str) and val and not val.startswith("{env:") and not val.startswith("${"):
+                sec["api_key"] = ""
+        op = data.get("operation")
+        if isinstance(op, dict):
+            val = op.get("api_key")
+            if isinstance(val, str) and val and not val.startswith("{env:") and not val.startswith("${"):
+                op["api_key"] = ""
+        return data
+
     def _save(self):
         try:
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                yaml.dump(self._cfg, f, default_flow_style=False, allow_unicode=True)
+                yaml.dump(self._sanitized_for_save(), f, default_flow_style=False, allow_unicode=True)
         except Exception:
             pass
 

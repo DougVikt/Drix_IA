@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import queue
 import threading
 from dataclasses import dataclass, field
@@ -31,6 +32,11 @@ from typing import Any, AsyncIterator
 import httpx
 
 from . import logs, secrets
+
+
+def _env_key_for_provider(provider: str) -> str:
+    p = str(provider or "").strip().upper().replace("-", "_")
+    return f"DRIX_{p}_API_KEY"
 
 DEFAULT_BASE_URLS = {
     "local": "http://127.0.0.1:11434",
@@ -163,7 +169,13 @@ def resolve(cfg=None) -> Resolved:
     else:
         model = str(op.get("model") or "").strip() or DEFAULT_MODELS.get(provider, "")
 
-    api_key = secrets.get_secret(secret_name(provider))
+    # Priority: env var > secrets store (hidden/protected) > legacy config
+    env_key = os.environ.get(_env_key_for_provider(provider), "").strip()
+    if not env_key and provider == "openai":
+        env_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not env_key and provider == "anthropic":
+        env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    api_key = env_key or secrets.get_secret(secret_name(provider))
     if not api_key:
         legacy = op.get("api_key")
         if secrets.is_real_secret(legacy):
