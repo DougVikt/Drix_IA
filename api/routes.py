@@ -1,4 +1,4 @@
-import sys, asyncio, re, os, threading, json
+import sys, asyncio, re, os, threading, json, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -8,10 +8,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from . import engine as api_engine
 from core.main import (
     ask, ask_stream, atualizar_aprendizado, config,
-    ConversationManager,
+    build_warmup_messages, ConversationManager,
 )
 import core.agent as agent
 import core.compaction as compaction
+import core.downloader as downloader
+import core.knowledge as knowledge
 import core.language as lang
 import core.mcp as mcp
 import core.media as media
@@ -101,6 +103,8 @@ _SETTINGS_BOOL = {
     "mcp.enabled",
     "web.auto_open",
     "web.indicator",
+    "downloads.enabled",
+    "knowledge.enabled",
 }
 
 _SETTINGS_INT = {
@@ -123,6 +127,12 @@ _SETTINGS_INT = {
     "memory.block_ttl_minutes": (0, 1440),
     "network.request_timeout": (1, 300),
     "tools.max_steps": (1, 50),
+    "downloads.max_concurrent": (1, 4),
+    "knowledge.max_file_mb": (1, 500),
+    "knowledge.chunk_size": (200, 8000),
+    "knowledge.chunk_overlap": (0, 2000),
+    "knowledge.top_k": (1, 20),
+    "knowledge.context_chars": (200, 12000),
 }
 
 _SETTINGS_FLOAT = {
@@ -141,9 +151,23 @@ _SETTINGS_LIST = {
     "security.allowed_folders",
 }
 
+_SETTINGS_TEXT = {
+    "downloads.dir",
+    "knowledge.dir",
+    "knowledge.db",
+}
+
+# Optional text settings: an empty value means "use the automatic default".
+_SETTINGS_OPTIONAL_TEXT = {
+    "downloads.cookies",
+    "downloads.ffmpeg",
+    "downloads.proxy",
+}
+
 _SETTINGS_KEYS = (
     _SETTINGS_BOOL | set(_SETTINGS_INT) | set(_SETTINGS_FLOAT)
-    | set(_SETTINGS_ENUM) | _SETTINGS_LIST | {"engine.keep_alive"}
+    | set(_SETTINGS_ENUM) | _SETTINGS_LIST | _SETTINGS_TEXT | _SETTINGS_OPTIONAL_TEXT
+    | {"engine.keep_alive"}
 )
 
 
@@ -215,6 +239,18 @@ def _coerce_setting(key: str, value):
         if len(cleaned) > 200:
             return False, None, "máximo de 200 itens"
         return True, cleaned, None
+
+    if key in _SETTINGS_TEXT or key in _SETTINGS_OPTIONAL_TEXT:
+        if not isinstance(value, str):
+            return False, None, "envie um texto"
+        text = value.strip()
+        if key in _SETTINGS_TEXT and not text:
+            return False, None, "informe um valor"
+        if len(text) > 300:
+            return False, None, "texto muito longo"
+        if any(ch in text for ch in ("\x00", "\n", "\r")):
+            return False, None, "texto inválido"
+        return True, text, None
 
     return False, None, "configuração não editável"
 
@@ -315,6 +351,71 @@ async def select_workspace(name: str):
 
 # ─── Chat ────────────────────────────────────────────────────
 
+_DL_QUALITY_RE = re.compile(r"(?<!\d)(144|240|360|480|720|1080|1440|2160)p?(?!\d)", re.I)
+
+
+def _parse_download_args(text: str) -> tuple[str, int | None, bool]:
+    """Parse ``/baixar <url> [720p] [audio]``."""
+    url = ""
+    quality = None
+    audio_only = False
+    for token in str(text or "").split():
+        low = token.lower()
+        if not url and re.match(r"^https?://", token, re.I):
+            url = token
+            continue
+        if low in ("audio", "áudio", "mp3", "somente-audio", "audio-only"):
+            audio_only = True
+            continue
+        match = _DL_QUALITY_RE.search(low)
+        if match and quality is None:
+            quality = int(match.group(1))
+    return url, quality, audio_only
+
+
+def _sse_event(payload: dict) -> str:
+    return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+
+
+async def _download_events(url: str, quality, audio_only: bool):
+    try:
+        job = await asyncio.to_thread(
+            downloader.start, url, quality=quality, audio_only=audio_only
+        )
+    except Exception as exc:
+        yield _sse_event({"t": f"Erro: {exc}"})
+        yield "data: [DONE]\n\n"
+        return
+
+    yield _sse_event({"t": f"Baixando: {job['url']}\n"})
+    started = time.time()
+    last_bucket = -1
+    last_update = 0.0
+    current = job
+
+    while time.time() - started < 1800:
+        await asyncio.sleep(2)
+        fresh = downloader.status(job["id"])
+        if not fresh:
+            break
+        current = fresh
+        if fresh["status"] in ("done", "error", "cancelled"):
+            break
+        if fresh["status"] == "downloading":
+            bucket = int(float(fresh.get("progress") or 0) // 25)
+            now = time.time()
+            if bucket != last_bucket or now - last_update >= 15:
+                yield _sse_event({"t": downloader.describe(fresh) + "\n"})
+                last_bucket = bucket
+                last_update = now
+        elif fresh["status"] == "processing" and last_bucket != 99:
+            yield _sse_event({"t": downloader.describe(fresh) + "\n"})
+            last_bucket = 99
+
+    yield _sse_event({"t": downloader.describe(downloader.status(job["id"]) or current) + "\n"})
+    yield "data: [DONE]\n\n"
+
+
 @router.post("/chat")
 async def chat(req: Request):
     body = await req.json()
@@ -345,6 +446,25 @@ async def chat(req: Request):
         active = [c for c in changes if c]
         text = "; ".join(active) if active else "No changes detected."
         return {"text": f"Sync: {text}", "type": "system"}
+
+    if cmd in ("/baixar", "/download") or cmd.startswith("/baixar ") or cmd.startswith("/download "):
+        arg = text.split(" ", 1)[1].strip() if " " in text else ""
+        url, quality, audio_only = _parse_download_args(arg)
+        if not url:
+            return {"text": "Use: /baixar <link> [720p] [audio]", "type": "system"}
+        stream = body.get("stream", False)
+        if stream:
+            return StreamingResponse(
+                _download_events(url, quality, audio_only),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+        try:
+            job = downloader.start(url, quality=quality, audio_only=audio_only)
+        except Exception as exc:
+            return {"text": f"Erro: {exc}", "type": "system"}
+        job = await asyncio.to_thread(downloader.wait, job["id"], 60)
+        return {"text": downloader.describe(job), "type": "system"}
 
     stream = body.get("stream", False)
 
@@ -422,10 +542,35 @@ async def select_model(req: Request):
     )
     if not ok:
         return JSONResponse({"detail": err}, status_code=400)
-    # Load the newly selected model in the background; the first message
-    # should not pay the 40-90 s cold-load cost.
-    asyncio.create_task(asyncio.to_thread(api_engine.preload_model, name))
-    return {"status": "selected", "name": name}
+    # Warm the new model in the background with the current conversation
+    # prefix.  The builder runs after any active answer finishes, so the
+    # preload sees the final history and the first reply is fast.
+    is_local = False
+    try:
+        is_local = providers.resolve().provider in ("local", "ollama")
+    except Exception:
+        pass
+    warming = False
+    if is_local:
+        try:
+            warming = api_engine.request_preload(
+                name,
+                message_builder=lambda: build_warmup_messages(conv_mgr),
+            )
+        except Exception as exc:
+            logs.warn(f"Model warmup queue failed: {exc}")
+    warning = ""
+    if is_local and not warming and not api_engine.model_fits_ram(name):
+        warning = (
+            "Modelo grande para a RAM disponível; será carregado na "
+            "primeira mensagem e pode demorar."
+        )
+    return {
+        "status": "selected",
+        "name": name,
+        "warming": warming,
+        "warning": warning,
+    }
 
 @router.post("/models/preload")
 async def preload_model(req: Request):
@@ -447,6 +592,152 @@ async def delete_model(name: str):
         return {"deleted": name}
     except Exception as e:
         return JSONResponse({"detail": str(e)}, status_code=400)
+
+
+# ─── Downloads ───────────────────────────────────────────────
+
+@router.get("/downloads")
+async def downloads_list():
+    return {"jobs": downloader.list_jobs(50), "info": downloader.info()}
+
+
+@router.post("/downloads/probe")
+async def downloads_probe(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"detail": "Corpo inválido"}, status_code=400)
+    url = _clean_text(body.get("url", ""), 4096)
+    if not url:
+        return JSONResponse({"detail": "URL obrigatória"}, status_code=400)
+    try:
+        data = await asyncio.to_thread(downloader.probe, url)
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)[:400]}, status_code=400)
+    return data
+
+
+@router.post("/downloads")
+async def downloads_start(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"detail": "Corpo inválido"}, status_code=400)
+    url = _clean_text(body.get("url", ""), 4096)
+    if not url:
+        return JSONResponse({"detail": "URL obrigatória"}, status_code=400)
+    quality = None
+    raw_quality = body.get("quality")
+    if raw_quality not in (None, ""):
+        try:
+            quality = int(raw_quality)
+        except (TypeError, ValueError):
+            return JSONResponse({"detail": "Qualidade inválida"}, status_code=400)
+        if not 144 <= quality <= 2160:
+            return JSONResponse({"detail": "Qualidade fora do intervalo"}, status_code=400)
+    try:
+        job = downloader.start(
+            url,
+            quality=quality,
+            audio_only=bool(body.get("audio_only")),
+            workspace=str(body.get("workspace") or "default"),
+        )
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)[:400]}, status_code=400)
+    return job
+
+
+@router.delete("/downloads")
+async def downloads_clear():
+    return {"removed": downloader.clear_finished()}
+
+
+@router.get("/downloads/{job_id}")
+async def downloads_status(job_id: str):
+    job = downloader.status(job_id)
+    if not job:
+        return JSONResponse({"detail": "Download não encontrado"}, status_code=404)
+    return job
+
+
+@router.delete("/downloads/{job_id}")
+async def downloads_cancel(job_id: str):
+    if not downloader.cancel(job_id):
+        return JSONResponse({"detail": "Download não encontrado ou já finalizado"},
+                            status_code=404)
+    return {"status": "cancelling", "id": job_id}
+
+
+# ─── Knowledge base ──────────────────────────────────────────
+
+@router.get("/knowledge")
+async def knowledge_list():
+    return {
+        "documents": knowledge.list_documents(200),
+        "info": knowledge.info(),
+    }
+
+
+@router.post("/knowledge/upload")
+async def knowledge_upload(file: UploadFile = File(...)):
+    data = await file.read()
+    try:
+        doc = await asyncio.to_thread(
+            knowledge.add_document, file.filename or "documento", data
+        )
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    except Exception as exc:
+        logs.warn(f"Knowledge upload failed: {exc}")
+        return JSONResponse({"detail": "Falha ao salvar o documento"}, status_code=500)
+    return doc
+
+
+@router.post("/knowledge/reindex")
+async def knowledge_reindex(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    doc_id = _clean_text(body.get("id", ""), 64) if isinstance(body, dict) else ""
+    try:
+        result = await asyncio.to_thread(knowledge.reindex, doc_id or None)
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    return result
+
+
+@router.post("/knowledge/search")
+async def knowledge_search(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"detail": "Corpo inválido"}, status_code=400)
+    query = _clean_text(body.get("query", ""), 2000)
+    if not query:
+        return JSONResponse({"detail": "Pergunta obrigatória"}, status_code=400)
+    try:
+        k = int(body.get("k") or 4)
+    except (TypeError, ValueError):
+        k = 4
+    results = await asyncio.to_thread(knowledge.search, query, k)
+    return {"query": query, "count": len(results), "results": results}
+
+
+@router.get("/knowledge/{doc_id}")
+async def knowledge_status(doc_id: str):
+    doc = knowledge.status(doc_id)
+    if not doc:
+        return JSONResponse({"detail": "Documento não encontrado"}, status_code=404)
+    return doc
+
+
+@router.delete("/knowledge/{doc_id}")
+async def knowledge_delete(doc_id: str):
+    ok = await asyncio.to_thread(knowledge.delete_document, doc_id)
+    if not ok:
+        return JSONResponse({"detail": "Documento não encontrado"}, status_code=404)
+    return {"deleted": doc_id}
 
 
 # ─── Memory ──────────────────────────────────────────────────
@@ -750,6 +1041,17 @@ async def update_settings(req: Request):
             continue
         updates[key] = value
 
+    if "knowledge.chunk_size" in updates or "knowledge.chunk_overlap" in updates:
+        try:
+            size = int(updates.get("knowledge.chunk_size",
+                                   config.get("knowledge", "chunk_size", default=1000)))
+            overlap = int(updates.get("knowledge.chunk_overlap",
+                                      config.get("knowledge", "chunk_overlap", default=200)))
+            if overlap >= size:
+                errors["knowledge.chunk_overlap"] = "deve ser menor que chunk_size"
+        except (TypeError, ValueError):
+            errors["knowledge.chunk_size"] = "valor inválido"
+
     if errors:
         return JSONResponse(
             {"detail": "Alguns valores são inválidos", "errors": errors},
@@ -771,6 +1073,8 @@ async def update_settings(req: Request):
             _invalidate_memory_cache()
         except Exception:
             pass
+    if any(key.startswith("knowledge.") for key in updates):
+        knowledge.reset_cache()
 
     logs.info(f"Settings updated: {', '.join(sorted(updates))}")
     return {
