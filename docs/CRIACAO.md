@@ -137,16 +137,6 @@ Checklist antes de commitar:
 4. Se alterar segredos, nunca versionar `config/config.yaml` com chaves em texto plano.
 5. Atualizar este guia se a estrutura ou os pré-requisitos mudarem.
 
-## Atualizando o dump de desenvolvimento
-
-```powershell
-F:\.venv\Scripts\python.exe F:\scripts\update_dump.py "motivo da atualização"
-```
-
-Gera/atualiza `DADOS_DEV/drix_complete_dump.json` (62+ arquivos de código-fonte, ~0,8 MB),
-excluindo `data/`, `logs/`, `workspace/`, `ia_system/`, caches e segredos.
-
----
 
 ## Problemas comuns na criação
 
