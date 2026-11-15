@@ -42,6 +42,14 @@
         </button>
       </div>
       <div class="topbar-right">
+        <button class="icon-btn knowledge-btn" id="knowledgeBtn" aria-label="Base de conhecimento" title="Base de conhecimento">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            <path d="M8 7h8M8 11h6" />
+          </svg>
+          <span class="knowledge-badge" id="knowledgeBadge" hidden>0</span>
+        </button>
         <button class="icon-btn" id="railToggle" aria-label="Abrir o painel" title="Abrir o painel">
           <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
             <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -241,6 +249,71 @@
 
   </div>
 
+  <div class="modal-overlay" id="knowledgeModal" hidden>
+    <div class="modal-card knowledge-card" role="dialog" aria-modal="true" aria-labelledby="knowledgeTitle">
+      <div class="modal-head settings-head knowledge-head">
+        <div class="settings-heading">
+          <span class="settings-logo knowledge-logo" aria-hidden="true">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              <path d="M8 7h8M8 11h6" />
+            </svg>
+          </span>
+          <div>
+            <h3 id="knowledgeTitle">Base de conhecimento</h3>
+            <p class="settings-sub" id="knowledgeSub">Documentos locais que a Drix consulta nas respostas</p>
+          </div>
+        </div>
+        <button class="icon-btn" id="knowledgeClose" aria-label="Fechar base de conhecimento">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body knowledge-body">
+        <div class="knowledge-drop" id="knowledgeDrop" tabindex="0" role="button" aria-label="Enviar documentos para a base">
+          <svg class="ic knowledge-drop-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M12 16V4M7 9l5-5 5 5" />
+            <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+          </svg>
+          <div class="knowledge-drop-text">
+            <strong>Envie documentos para a base</strong>
+            <p>Arraste arquivos aqui ou clique para escolher · PDF, DOCX, TXT, MD, HTML, CSV, JSON</p>
+          </div>
+          <input type="file" id="knowledgeFile" multiple hidden
+            accept=".pdf,.txt,.md,.markdown,.html,.htm,.csv,.json,.docx" />
+        </div>
+        <p class="knowledge-status" id="knowledgeStatus" role="status"></p>
+        <p class="knowledge-stats" id="knowledgeStats">Carregando…</p>
+
+        <div class="knowledge-search">
+          <input class="input" id="knowledgeQuery" type="search" placeholder="Testar uma busca semântica na base…" autocomplete="off" />
+          <button class="btn settings-save" id="knowledgeSearchBtn" type="button">Buscar</button>
+        </div>
+        <div class="knowledge-results" id="knowledgeResults" hidden></div>
+
+        <div class="knowledge-list-head">
+          <p class="settings-group">Documentos</p>
+          <div class="knowledge-list-actions">
+            <button class="btn btn-secondary" id="knowledgeRefresh" type="button">Atualizar</button>
+            <button class="btn btn-secondary" id="knowledgeReindexAll" type="button">Reindexar tudo</button>
+          </div>
+        </div>
+        <div class="knowledge-list" id="knowledgeList">
+          <p class="settings-note">Nenhum documento na base.</p>
+        </div>
+      </div>
+
+      <div class="settings-actions knowledge-actions">
+        <span class="settings-status" id="knowledgeFooter"></span>
+        <button class="btn btn-secondary" id="knowledgeSettingsBtn" type="button">Configurar</button>
+        <button class="btn btn-secondary" id="knowledgeDone" type="button">Fechar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="settingsModal" hidden>
     <div class="modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-head settings-head">
@@ -265,6 +338,8 @@
         <button class="settings-tab" type="button" data-tab="memory" role="tab">Memória</button>
         <button class="settings-tab" type="button" data-tab="network" role="tab">Rede</button>
         <button class="settings-tab" type="button" data-tab="tools" role="tab">Ferramentas</button>
+        <button class="settings-tab" type="button" data-tab="downloads" role="tab">Downloads</button>
+        <button class="settings-tab" type="button" data-tab="knowledge" role="tab">Conhecimento</button>
         <button class="settings-tab" type="button" data-tab="system" role="tab">Sistema</button>
       </div>
 
@@ -763,6 +838,173 @@
           <div class="setting"><div class="setting-row"><div><p class="setting-name">Skill de vídeo</p><p class="setting-desc">Processamento de vídeos.</p></div><label class="switch"><input type="checkbox" data-key="skills.video_skill" /><span class="track"></span></label></div></div>
           <div class="setting"><div class="setting-row"><div><p class="setting-name">Skill de visão</p><p class="setting-desc">Análise de imagens e capturas.</p></div><label class="switch"><input type="checkbox" data-key="skills.vision_skill" /><span class="track"></span></label></div></div>
           <div class="setting"><div class="setting-row"><div><p class="setting-name">Agentes e subagentes</p><p class="setting-desc">Habilita o modo agente com ferramentas.</p></div><label class="switch"><input type="checkbox" data-key="agents.enabled" /><span class="track"></span></label></div></div>
+        </section>
+
+        <section class="settings-section" data-section="downloads" hidden>
+          <p class="settings-group">Baixar por link</p>
+          <div class="setting">
+            <div class="field">
+              <label class="setting-name" for="dlUrl">Link do vídeo, áudio ou arquivo</label>
+              <div class="settings-inline">
+                <input class="input" id="dlUrl" type="url" placeholder="https://..." autocomplete="off" />
+                <button class="btn settings-save" id="dlStart" type="button">Baixar</button>
+              </div>
+              <p class="setting-desc" id="dlHint">YouTube, Instagram, TikTok, X, Reddit, Twitch e links diretos.</p>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="dlQuality">Qualidade máxima</label>
+                <select class="input" id="dlQuality">
+                  <option value="">Melhor disponível</option>
+                  <option value="2160">2160p</option>
+                  <option value="1440">1440p</option>
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                  <option value="360">360p</option>
+                </select>
+              </div>
+            </div>
+            <div class="setting">
+              <div class="setting-row">
+                <div>
+                  <p class="setting-name">Somente áudio</p>
+                  <p class="setting-desc">Extrai MP3 quando o ffmpeg está disponível.</p>
+                </div>
+                <label class="switch"><input type="checkbox" id="dlAudioOnly" /><span class="track"></span></label>
+              </div>
+            </div>
+          </div>
+          <div class="settings-inline settings-buttons">
+            <button class="btn btn-secondary" id="dlRefresh" type="button">Atualizar lista</button>
+            <button class="btn btn-secondary" id="dlClearDone" type="button">Limpar concluídos</button>
+          </div>
+          <p class="settings-note" id="dlEngineInfo">—</p>
+
+          <p class="settings-group">Na fila e concluídos</p>
+          <div class="download-list" id="downloadList">
+            <p class="settings-note">Nenhum download ainda.</p>
+          </div>
+
+          <p class="settings-group">Configuração</p>
+          <div class="setting">
+            <div class="setting-row">
+              <div>
+                <p class="setting-name">Downloads ativos</p>
+                <p class="setting-desc">Permite baixar mídia por link.</p>
+              </div>
+              <label class="switch"><input type="checkbox" data-key="downloads.enabled" /><span class="track"></span></label>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-downloads-dir">Pasta de downloads</label>
+                <input class="input" id="set-downloads-dir" type="text" data-key="downloads.dir" placeholder="./workspace/downloads" />
+              </div>
+            </div>
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-downloads-concurrent">Downloads simultâneos</label>
+                <input class="input" id="set-downloads-concurrent" type="number" min="1" max="4" data-key="downloads.max_concurrent" />
+              </div>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-downloads-proxy">Proxy (opcional)</label>
+                <input class="input" id="set-downloads-proxy" type="text" data-key="downloads.proxy" placeholder="http://127.0.0.1:8080" />
+              </div>
+            </div>
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-downloads-cookies">Cookies (opcional)</label>
+                <input class="input" id="set-downloads-cookies" type="text" data-key="downloads.cookies" placeholder="caminho para cookies.txt" />
+              </div>
+            </div>
+          </div>
+          <div class="setting">
+            <div class="field">
+              <label class="setting-name" for="set-downloads-ffmpeg">ffmpeg (opcional)</label>
+              <input class="input" id="set-downloads-ffmpeg" type="text" data-key="downloads.ffmpeg" placeholder="detectado automaticamente" />
+              <p class="setting-desc">Vazio usa o ffmpeg portátil que já acompanha a Drix.</p>
+            </div>
+          </div>
+          <p class="settings-note">O ffmpeg portátil já acompanha a Drix para juntar vídeo e áudio e converter MP3. Proxy, cookies e ffmpeg são opcionais.</p>
+        </section>
+
+        <section class="settings-section" data-section="knowledge" hidden>
+          <p class="settings-group">Base de conhecimento</p>
+          <div class="setting">
+            <div class="setting-row">
+              <div>
+                <p class="setting-name">Base ativa</p>
+                <p class="setting-desc">Permite enviar documentos e consultar a base nas respostas do chat.</p>
+              </div>
+              <label class="switch"><input type="checkbox" data-key="knowledge.enabled" /><span class="track"></span></label>
+            </div>
+          </div>
+          <div class="settings-inline settings-buttons">
+            <button class="btn settings-save" id="knowledgeOpenBtn" type="button">Abrir base de conhecimento</button>
+            <button class="btn btn-secondary" id="knowledgeSettingsRefresh" type="button">Atualizar estado</button>
+          </div>
+          <p class="settings-note" id="knowledgeSettingsInfo">—</p>
+
+          <p class="settings-group">Indexação</p>
+          <div class="settings-grid">
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-knowledge-max">Tamanho máximo por arquivo (MB)</label>
+                <input class="input" id="set-knowledge-max" type="number" min="1" max="500" data-key="knowledge.max_file_mb" />
+              </div>
+            </div>
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-knowledge-topk">Trechos por pergunta</label>
+                <input class="input" id="set-knowledge-topk" type="number" min="1" max="20" data-key="knowledge.top_k" />
+              </div>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-knowledge-chunk">Tamanho do trecho (caracteres)</label>
+                <input class="input" id="set-knowledge-chunk" type="number" min="200" max="8000" data-key="knowledge.chunk_size" />
+              </div>
+            </div>
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-knowledge-overlap">Sobreposição (caracteres)</label>
+                <input class="input" id="set-knowledge-overlap" type="number" min="0" max="2000" data-key="knowledge.chunk_overlap" />
+                <p class="setting-desc">Precisa ser menor que o tamanho do trecho.</p>
+              </div>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-knowledge-context">Contexto no prompt (caracteres)</label>
+                <input class="input" id="set-knowledge-context" type="number" min="200" max="12000" data-key="knowledge.context_chars" />
+              </div>
+            </div>
+            <div class="setting">
+              <div class="field">
+                <label class="setting-name" for="set-knowledge-dir">Pasta dos documentos</label>
+                <input class="input" id="set-knowledge-dir" type="text" data-key="knowledge.dir" placeholder="./data/knowledge" />
+              </div>
+            </div>
+          </div>
+          <div class="setting">
+            <div class="field">
+              <label class="setting-name" for="set-knowledge-db">Índice vetorial</label>
+              <input class="input" id="set-knowledge-db" type="text" data-key="knowledge.db" placeholder="./data/knowledge_db" />
+              <p class="setting-desc">Pasta separada do índice de aprendizagem. Mudanças passam a valer no próximo uso.</p>
+            </div>
+          </div>
+          <p class="settings-note">Os originais ficam em data/knowledge e o índice em data/knowledge_db; o índice de aprendizagem (data/vector_db) não é alterado. A busca usa o modelo local nomic-embed-text pelo Ollama.</p>
         </section>
 
         <section class="settings-section" data-section="system" hidden>

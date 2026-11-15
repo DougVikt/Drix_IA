@@ -1679,6 +1679,468 @@ img.brand-name {
     word-break: break-word;
 }
 
+.download-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.download-row {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--fg-soft);
+}
+
+.download-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.download-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.download-badge {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--fg-soft);
+    color: var(--muted);
+    border: 1px solid var(--border);
+}
+
+.download-badge.downloading,
+.download-badge.processing {
+    color: var(--accent);
+    border-color: var(--ring);
+    background: var(--accent-soft);
+}
+
+.download-badge.done {
+    color: oklch(72% 0.15 155);
+    border-color: color-mix(in oklch, oklch(72% 0.15 155) 40%, transparent);
+}
+
+.download-badge.error,
+.download-badge.cancelled {
+    color: var(--danger);
+    border-color: color-mix(in oklch, var(--danger) 40%, transparent);
+}
+
+.download-bar {
+    height: 5px;
+    margin: 8px 0 2px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--bg) 70%, transparent);
+    overflow: hidden;
+}
+
+.download-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent);
+    transition: width 0.4s ease;
+}
+
+.download-meta {
+    margin: 5px 0 0;
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.download-cancel {
+    margin-top: 6px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+}
+
+/* ─── base de conhecimento ────────────────────────────────────────── */
+.knowledge-btn {
+    position: relative;
+}
+
+.knowledge-badge {
+    position: absolute;
+    top: 2px;
+    right: 1px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    border: 1px solid var(--bg);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+}
+
+.knowledge-card {
+    width: min(780px, 100%);
+    max-height: 88vh;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.knowledge-head {
+    padding: 18px 22px 12px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklch, var(--surface) 92%, var(--bg));
+}
+
+.knowledge-logo {
+    display: grid;
+    place-items: center;
+    color: var(--accent);
+}
+
+.knowledge-logo .ic {
+    width: 20px;
+    height: 20px;
+}
+
+.knowledge-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 16px 22px 22px;
+    overscroll-behavior: contain;
+}
+
+.knowledge-drop {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px dashed color-mix(in oklch, var(--accent) 45%, var(--border));
+    border-radius: var(--radius-lg);
+    background: color-mix(in oklch, var(--accent) 6%, transparent);
+    color: var(--fg);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.knowledge-drop:hover,
+.knowledge-drop:focus-visible,
+.knowledge-drop.dragover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    outline: none;
+}
+
+.knowledge-drop.dragover {
+    box-shadow: 0 0 0 3px var(--ring);
+}
+
+.knowledge-drop-ic {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    color: var(--accent);
+}
+
+.knowledge-drop-text {
+    min-width: 0;
+}
+
+.knowledge-drop-text strong {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.knowledge-drop-text p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.45;
+}
+
+.knowledge-status {
+    min-height: 16px;
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.knowledge-status.ok {
+    color: oklch(72% 0.15 155);
+}
+
+.knowledge-status.err {
+    color: var(--danger);
+}
+
+.knowledge-stats {
+    margin: 4px 0 14px;
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+}
+
+.knowledge-search {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.knowledge-search .input {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13.5px;
+}
+
+.knowledge-search .input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
+}
+
+.knowledge-results {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 8px 0 4px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: color-mix(in oklch, var(--bg) 55%, transparent);
+}
+
+.knowledge-result {
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--fg-soft);
+}
+
+.knowledge-result-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.knowledge-source {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.knowledge-score {
+    flex: none;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 10.5px;
+    color: var(--muted);
+}
+
+.knowledge-snippet {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.knowledge-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.knowledge-list-head .settings-group {
+    margin: 14px 0 4px;
+}
+
+.knowledge-list-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.knowledge-list-actions .btn {
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+.knowledge-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.knowledge-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--fg-soft);
+}
+
+.knowledge-file {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--accent);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.knowledge-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.knowledge-name {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.knowledge-meta {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.knowledge-error {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--danger);
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.knowledge-state {
+    flex: none;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--fg-soft);
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.knowledge-state.ready {
+    color: oklch(72% 0.15 155);
+    border-color: color-mix(in oklch, oklch(72% 0.15 155) 40%, transparent);
+}
+
+.knowledge-state.indexing,
+.knowledge-state.queued {
+    color: var(--accent);
+    border-color: var(--ring);
+    background: var(--accent-soft);
+}
+
+.knowledge-state.indexing {
+    animation: knowledge-pulse 1.4s ease-in-out infinite;
+}
+
+.knowledge-state.error {
+    color: var(--danger);
+    border-color: color-mix(in oklch, var(--danger) 40%, transparent);
+}
+
+@keyframes knowledge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.knowledge-actions-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+}
+
+.knowledge-act {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+}
+
+.knowledge-act:hover {
+    background: var(--bg);
+    border-color: var(--border);
+    color: var(--fg);
+}
+
+.knowledge-act.danger:hover {
+    color: var(--danger);
+    border-color: color-mix(in oklch, var(--danger) 40%, var(--border));
+    background: color-mix(in oklch, var(--danger) 10%, transparent);
+}
+
+.knowledge-act[disabled] {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.knowledge-act .ic {
+    width: 14px;
+    height: 14px;
+}
+
 @media (max-width: 720px) {
     .modal-overlay {
         padding: 8px;
@@ -1709,6 +2171,28 @@ img.brand-name {
 
     .settings-status {
         flex-basis: 100%;
+    }
+
+    .knowledge-card {
+        max-height: 94vh;
+    }
+
+    .knowledge-head,
+    .knowledge-body {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .knowledge-search {
+        flex-wrap: wrap;
+    }
+
+    .knowledge-search .input {
+        flex-basis: 100%;
+    }
+
+    .knowledge-list-actions {
+        width: 100%;
     }
 }
 

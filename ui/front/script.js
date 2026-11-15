@@ -11,6 +11,7 @@
   let attachBtn = $('#attachBtn'), attachMenu = $('#attachMenu'), attachChip = $('#attachChip');
   let attachChipName = $('#attachChipName'), attachChipRemove = $('#attachChipRemove');
   let settingsBtn = $('#settingsBtn'), settingsModal = $('#settingsModal'), settingsClose = $('#settingsClose');
+  let knowledgeBtn = $('#knowledgeBtn'), knowledgeModal = $('#knowledgeModal'), knowledgeClose = $('#knowledgeClose');
   let typewriterSwitch = $('#typewriterSwitch');
   let ESC = function (s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); };
 
@@ -70,7 +71,7 @@
     loadSettingsPanel();
     activateSettingsTab(currentTab);
   }
-  function closeModal() { settingsModal.hidden = true; if (lastFocus) lastFocus.focus(); }
+  function closeModal() { settingsModal.hidden = true; stopDownloadPolling(); if (lastFocus) lastFocus.focus(); }
   settingsBtn.addEventListener('click', openModal);
   settingsClose.addEventListener('click', closeModal);
   settingsModal.addEventListener('click', function (e) {
@@ -85,6 +86,7 @@
   let settingsBaseline = {};
   let providerCatalog = [];
   let engineInfo = { host: '127.0.0.1', port: 11434 };
+  let downloadTimer = null;
 
   function setSettingsStatus(message, kind) {
     let el = $('#settingsStatus');
@@ -117,9 +119,12 @@
     document.querySelectorAll('.settings-section').forEach(function (section) {
       section.hidden = section.dataset.section !== currentTab;
     });
+    if (currentTab !== 'downloads') stopDownloadPolling();
     if (currentTab === 'engine') loadEngineStatus();
     if (currentTab === 'memory') loadMemoryStatus();
     if (currentTab === 'tools') loadToolsPanel();
+    if (currentTab === 'downloads') loadDownloadsPanel();
+    if (currentTab === 'knowledge') loadKnowledgePanel(true);
     if (currentTab === 'system') { loadSystemStatus(); loadLogs(); }
     if (currentTab === 'model') loadModelsPanel();
   }
@@ -399,6 +404,127 @@
       });
   }
 
+  function stopDownloadPolling() {
+    if (downloadTimer) { clearInterval(downloadTimer); downloadTimer = null; }
+  }
+
+  function formatBytesJs(value) {
+    let n = Number(value || 0);
+    if (!n || !isFinite(n)) return '';
+    let units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+    return n.toFixed(1) + ' ' + units[i];
+  }
+
+  function formatEtaJs(value) {
+    let seconds = Number(value);
+    if (!isFinite(seconds) || seconds < 0) return '';
+    if (seconds < 60) return 'faltam ' + Math.round(seconds) + 's';
+    let minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return 'faltam ' + minutes + 'min';
+    return 'faltam ' + Math.floor(minutes / 60) + 'h';
+  }
+
+  function downloadRow(job) {
+    let row = document.createElement('div');
+    row.className = 'download-row';
+
+    let head = document.createElement('div');
+    head.className = 'download-head';
+    let title = document.createElement('p');
+    title.className = 'download-title';
+    title.textContent = job.title || job.filename || job.url;
+    title.title = job.filepath || job.url;
+    let badge = document.createElement('span');
+    badge.className = 'download-badge ' + (job.status || '');
+    badge.textContent = ({
+      queued: 'na fila', downloading: 'baixando', processing: 'processando',
+      cancelling: 'cancelando', done: 'concluído', error: 'falhou', cancelled: 'cancelado'
+    })[job.status] || job.status || '—';
+    head.appendChild(title);
+    head.appendChild(badge);
+    row.appendChild(head);
+
+    if (job.status === 'downloading' || job.status === 'processing') {
+      let bar = document.createElement('div');
+      bar.className = 'download-bar';
+      let fill = document.createElement('div');
+      fill.className = 'download-fill';
+      fill.style.width = Math.max(2, Math.min(100, Number(job.progress) || 0)) + '%';
+      bar.appendChild(fill);
+      row.appendChild(bar);
+    }
+
+    let meta = document.createElement('p');
+    meta.className = 'download-meta';
+    let bits = [];
+    if (job.status === 'downloading') {
+      bits.push((Number(job.progress) || 0).toFixed(0) + '%');
+      if (job.speed) bits.push(formatBytesJs(job.speed) + '/s');
+      bits.push(formatEtaJs(job.eta));
+    }
+    if (job.status === 'done') bits.push(formatBytesJs(job.bytes));
+    if (job.status === 'error') bits.push(job.error || 'erro');
+    if (job.status === 'cancelled') bits.push(job.error || 'cancelado');
+    if (job.filepath) bits.push(job.filepath);
+    meta.textContent = bits.filter(Boolean).join(' · ');
+    row.appendChild(meta);
+
+    if (['queued', 'downloading', 'processing', 'cancelling'].indexOf(job.status) !== -1) {
+      let cancel = document.createElement('button');
+      cancel.className = 'btn btn-ghost download-cancel';
+      cancel.type = 'button';
+      cancel.textContent = 'Cancelar';
+      cancel.addEventListener('click', function () {
+        cancel.disabled = true;
+        api('/downloads/' + encodeURIComponent(job.id), { method: 'DELETE' })
+          .then(function (r) { return readResponse(r); })
+          .then(loadDownloadsPanel)
+          .catch(function (e) {
+            setSettingsStatus(e && e.message ? e.message : 'Falha ao cancelar.', 'err');
+            cancel.disabled = false;
+          });
+      });
+      row.appendChild(cancel);
+    }
+    return row;
+  }
+
+  function loadDownloadsPanel() {
+    return api('/downloads')
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        let box = $('#downloadList');
+        if (!box) return;
+        let jobs = data.jobs || [];
+        box.innerHTML = '';
+        if (!jobs.length) {
+          let empty = document.createElement('p');
+          empty.className = 'settings-note';
+          empty.textContent = 'Nenhum download ainda.';
+          box.appendChild(empty);
+        } else {
+          jobs.forEach(function (job) { box.appendChild(downloadRow(job)); });
+        }
+        let info = data.info || {};
+        let engine = $('#dlEngineInfo');
+        if (engine) {
+          engine.textContent =
+            (info.engine || 'yt-dlp') +
+            (info.ffmpeg ? ' · ffmpeg pronto' : ' · sem ffmpeg (qualidade limitada)') +
+            ' · pasta: ' + (info.dir || '—') +
+            ' · ativos: ' + (info.active || 0);
+        }
+        if (currentTab === 'downloads' && !settingsModal.hidden && !downloadTimer) {
+          downloadTimer = setInterval(loadDownloadsPanel, 2000);
+        }
+      })
+      .catch(function (e) {
+        setSettingsStatus(e && e.message ? e.message : 'Falha ao carregar downloads.', 'err');
+      });
+  }
+
   function loadSystemStatus() {
     return api('/status')
       .then(function (r) { return readResponse(r); })
@@ -514,6 +640,7 @@
         );
         loadProvidersPanel();
         loadEngineStatus();
+        loadKnowledgePanel(true);
       })
       .catch(function (e) {
         setSettingsStatus(e && e.message ? e.message : 'Falha ao salvar.', 'err');
@@ -579,8 +706,16 @@
     setSettingsStatus('Trocando modelo para ' + name + '…');
     api('/models/select', { method: 'POST', body: JSON.stringify({ name: name }) })
       .then(function (r) { return readResponse(r); })
-      .then(function () {
-        setSettingsStatus('Modelo ' + name + ' selecionado. O motor vai carregá-lo.', 'ok');
+      .then(function (data) {
+        if (data && data.warming === false) {
+          setSettingsStatus(
+            (data && data.warning) ||
+            ('Modelo ' + name + ' selecionado. Ele será carregado na primeira mensagem.'),
+            'ok'
+          );
+        } else {
+          setSettingsStatus('Modelo ' + name + ' selecionado. Aquecendo com o histórico…', 'ok');
+        }
         loadModelsPanel();
         loadProvidersPanel();
         setTimeout(loadEngineStatus, 800);
@@ -649,6 +784,418 @@
   });
   $('#logsRefresh').addEventListener('click', loadLogs);
 
+  /* downloads */
+  $('#dlStart').addEventListener('click', function () {
+    let url = $('#dlUrl').value.trim();
+    if (!url) { setSettingsStatus('Cole um link para baixar.', 'err'); return; }
+    let payload = { url: url, audio_only: $('#dlAudioOnly').checked };
+    let quality = $('#dlQuality').value;
+    if (quality) payload.quality = Number(quality);
+    setSettingsStatus('Iniciando download…');
+    api('/downloads', { method: 'POST', body: JSON.stringify(payload) })
+      .then(function (r) { return readResponse(r); })
+      .then(function (job) {
+        $('#dlUrl').value = '';
+        setSettingsStatus('Download iniciado: ' + (job.title || job.url), 'ok');
+        loadDownloadsPanel();
+      })
+      .catch(function (e) {
+        setSettingsStatus(e && e.message ? e.message : 'Falha ao iniciar o download.', 'err');
+      });
+  });
+  $('#dlUrl').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); $('#dlStart').click(); }
+  });
+  $('#dlRefresh').addEventListener('click', loadDownloadsPanel);
+  $('#dlClearDone').addEventListener('click', function () {
+    api('/downloads', { method: 'DELETE' })
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        setSettingsStatus((data.removed || 0) + ' item(ns) removido(s).', 'ok');
+        loadDownloadsPanel();
+      })
+      .catch(function (e) {
+        setSettingsStatus(e && e.message ? e.message : 'Falha ao limpar a lista.', 'err');
+      });
+  });
+
+  /*  base de conhecimento  */
+  let knowledgeTimer = null;
+  let knowledgeBusy = false;
+  let knowledgeDocs = [];
+  let knowledgeInfo = {};
+  let knowledgeLastFocus = null;
+
+  function stopKnowledgePolling() {
+    if (knowledgeTimer) { clearInterval(knowledgeTimer); knowledgeTimer = null; }
+  }
+
+  function setKnowledgeStatus(message, kind) {
+    let el = $('#knowledgeStatus');
+    if (!el) return;
+    el.textContent = message || '';
+    el.classList.remove('ok', 'err');
+    if (kind) el.classList.add(kind);
+    let footer = $('#knowledgeFooter');
+    if (footer) footer.textContent = message || '';
+  }
+
+  function knowledgeMeta(doc) {
+    let bits = [];
+    let ext = String(doc.ext || '').replace('.', '').toUpperCase();
+    if (ext) bits.push(ext);
+    if (doc.size) bits.push(formatBytesJs(doc.size));
+    if (doc.status === 'ready') bits.push((doc.chunks || 0) + ' trecho(s)');
+    if (doc.added_at) {
+      let when = String(doc.added_at).replace('T', ' ').slice(0, 16);
+      if (when) bits.push(when);
+    }
+    return bits.join(' · ');
+  }
+
+  function knowledgeRow(doc) {
+    let row = document.createElement('div');
+    row.className = 'knowledge-row';
+
+    let ext = document.createElement('span');
+    ext.className = 'knowledge-file';
+    ext.textContent = (String(doc.ext || '').replace('.', '') || 'doc').slice(0, 4);
+    row.appendChild(ext);
+
+    let info = document.createElement('div');
+    info.className = 'knowledge-info';
+    let name = document.createElement('p');
+    name.className = 'knowledge-name';
+    name.textContent = doc.name || 'documento';
+    name.title = doc.name || '';
+    info.appendChild(name);
+    let meta = document.createElement('p');
+    meta.className = 'knowledge-meta';
+    meta.textContent = knowledgeMeta(doc) || 'aguardando indexação';
+    info.appendChild(meta);
+    if (doc.error) {
+      let err = document.createElement('p');
+      err.className = 'knowledge-error';
+      err.textContent = doc.error;
+      info.appendChild(err);
+    }
+    row.appendChild(info);
+
+    let state = document.createElement('span');
+    state.className = 'knowledge-state ' + (doc.status || '');
+    state.textContent = ({
+      queued: 'na fila', indexing: 'indexando', ready: 'pronto', error: 'erro'
+    })[doc.status] || doc.status || '—';
+    row.appendChild(state);
+
+    let actions = document.createElement('div');
+    actions.className = 'knowledge-actions-row';
+
+    let reindex = document.createElement('button');
+    reindex.className = 'knowledge-act';
+    reindex.type = 'button';
+    reindex.title = 'Reindexar documento';
+    reindex.setAttribute('aria-label', 'Reindexar ' + (doc.name || 'documento'));
+    reindex.innerHTML = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>';
+    reindex.disabled = knowledgeBusy || doc.status === 'queued' || doc.status === 'indexing';
+    reindex.addEventListener('click', function () {
+      reindex.disabled = true;
+      setKnowledgeStatus('Reenfileirando ' + (doc.name || 'documento') + '…');
+      api('/knowledge/reindex', { method: 'POST', body: JSON.stringify({ id: doc.id }) })
+        .then(function (r) { return readResponse(r); })
+        .then(function () { setKnowledgeStatus('Reindexação agendada.', 'ok'); loadKnowledgePanel(true); })
+        .catch(function (e) {
+          setKnowledgeStatus(e && e.message ? e.message : 'Falha ao reindexar.', 'err');
+          reindex.disabled = false;
+        });
+    });
+    actions.appendChild(reindex);
+
+    let del = document.createElement('button');
+    del.className = 'knowledge-act danger';
+    del.type = 'button';
+    del.title = 'Excluir documento';
+    del.setAttribute('aria-label', 'Excluir ' + (doc.name || 'documento'));
+    del.innerHTML = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15"/><path d="M10 11v6M14 11v6"/></svg>';
+    del.disabled = knowledgeBusy;
+    del.addEventListener('click', function () {
+      if (!confirm('Excluir "' + (doc.name || 'documento') + '" da base de conhecimento?')) return;
+      del.disabled = true;
+      setKnowledgeStatus('Excluindo ' + (doc.name || 'documento') + '…');
+      api('/knowledge/' + encodeURIComponent(doc.id), { method: 'DELETE' })
+        .then(function (r) { return readResponse(r); })
+        .then(function () {
+          setKnowledgeStatus('Documento excluído.', 'ok');
+          $('#knowledgeResults').hidden = true;
+          loadKnowledgePanel(true);
+        })
+        .catch(function (e) {
+          setKnowledgeStatus(e && e.message ? e.message : 'Falha ao excluir.', 'err');
+          del.disabled = false;
+        });
+    });
+    actions.appendChild(del);
+    row.appendChild(actions);
+    return row;
+  }
+
+  function renderKnowledgeStats() {
+    let info = knowledgeInfo || {};
+    let stats = $('#knowledgeStats');
+    if (stats) {
+      let parts = [
+        (info.documents || 0) + ' documento(s)',
+        (info.ready || 0) + ' pronto(s)',
+        (info.chunks || 0) + ' trecho(s)'
+      ];
+      if (info.pending) parts.push(info.pending + ' indexando');
+      parts.push(info.available ? 'busca local ativa' : 'busca indisponível');
+      stats.textContent = parts.join(' · ');
+    }
+    let badge = $('#knowledgeBadge');
+    if (badge) {
+      let ready = Number(info.ready) || 0;
+      badge.hidden = ready <= 0;
+      badge.textContent = ready > 99 ? '99+' : String(ready);
+    }
+    let cfg = $('#knowledgeSettingsInfo');
+    if (cfg) {
+      let readers = '';
+      if (info.pdf === false) readers += ' PDF';
+      if (info.docx === false) readers += ' DOCX';
+      cfg.textContent = 'Pasta: ' + (info.dir || '—') +
+        ' · Índice: ' + (info.db || '—') +
+        ' · ' + (info.documents || 0) + ' documento(s)' +
+        ((info.pending || 0) ? ' · ' + info.pending + ' indexando' : '') +
+        (readers ? ' · leitores ausentes:' + readers : '');
+    }
+  }
+
+  function renderKnowledgeList() {
+    let box = $('#knowledgeList');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!knowledgeDocs.length) {
+      let empty = document.createElement('p');
+      empty.className = 'settings-note';
+      empty.textContent = knowledgeInfo && knowledgeInfo.enabled === false
+        ? 'A base está desligada nas configurações.'
+        : 'Nenhum documento na base ainda. Envie um arquivo acima.';
+      box.appendChild(empty);
+      return;
+    }
+    knowledgeDocs.forEach(function (doc) { box.appendChild(knowledgeRow(doc)); });
+  }
+
+  function scheduleKnowledgePolling() {
+    let pending = knowledgeDocs.some(function (doc) {
+      return doc.status === 'queued' || doc.status === 'indexing';
+    });
+    if (pending && !knowledgeModal.hidden && !knowledgeTimer) {
+      knowledgeTimer = setInterval(function () { loadKnowledgePanel(true); }, 2000);
+    } else if (!pending) {
+      stopKnowledgePolling();
+    }
+  }
+
+  function loadKnowledgePanel(silent) {
+    if (!silent) setKnowledgeStatus('Carregando base de conhecimento…');
+    return api('/knowledge')
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        knowledgeDocs = data.documents || [];
+        knowledgeInfo = data.info || {};
+        renderKnowledgeStats();
+        renderKnowledgeList();
+        scheduleKnowledgePolling();
+        if (!silent) setKnowledgeStatus('');
+      })
+      .catch(function (e) {
+        if (!silent) setKnowledgeStatus(e && e.message ? e.message : 'Falha ao carregar a base.', 'err');
+      });
+  }
+
+  function openKnowledgeModal() {
+    knowledgeLastFocus = document.activeElement;
+    if (!settingsModal.hidden) {
+      settingsModal.hidden = true;
+      stopDownloadPolling();
+    }
+    knowledgeModal.hidden = false;
+    knowledgeClose.focus();
+    loadKnowledgePanel();
+  }
+
+  function closeKnowledgeModal() {
+    if (knowledgeModal.hidden) return;
+    knowledgeModal.hidden = true;
+    stopKnowledgePolling();
+    if (knowledgeLastFocus && knowledgeLastFocus.focus) knowledgeLastFocus.focus();
+  }
+
+  function uploadKnowledgeFiles(fileList) {
+    let files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+    if (knowledgeBusy) { setKnowledgeStatus('Aguarde o envio atual terminar.', 'err'); return; }
+    knowledgeBusy = true;
+    let ok = 0;
+    let dup = 0;
+    let errors = [];
+    let chain = Promise.resolve();
+    files.forEach(function (file) {
+      chain = chain.then(function () {
+        setKnowledgeStatus('Enviando ' + file.name + '…');
+        let form = new FormData();
+        form.append('file', file, file.name);
+        return api('/knowledge/upload', { method: 'POST', body: form })
+          .then(function (r) { return readResponse(r); })
+          .then(function (doc) {
+            if (doc && doc.duplicate) dup += 1; else ok += 1;
+          })
+          .catch(function (e) {
+            errors.push(file.name + ': ' + (e && e.message ? e.message : 'falhou'));
+          });
+      });
+    });
+    chain.then(function () {
+      knowledgeBusy = false;
+      let parts = [];
+      if (ok) parts.push(ok + ' enviado(s)');
+      if (dup) parts.push(dup + ' já estava(m) na base');
+      if (errors.length) parts.push(errors.length + ' falhou(aram)');
+      let message = parts.join(' · ') || 'Nenhum arquivo enviado.';
+      if (errors.length) message += ' — ' + errors[0];
+      setKnowledgeStatus(message, errors.length ? 'err' : 'ok');
+      loadKnowledgePanel(true);
+    });
+  }
+
+  function renderKnowledgeResults(query, results) {
+    let box = $('#knowledgeResults');
+    if (!box) return;
+    box.hidden = false;
+    box.innerHTML = '';
+    let head = document.createElement('p');
+    head.className = 'settings-note';
+    head.style.margin = '0';
+    head.textContent = results.length
+      ? results.length + ' trecho(s) para "' + query + '"'
+      : 'Nenhum trecho encontrado para "' + query + '". Verifique se os documentos já foram indexados.';
+    box.appendChild(head);
+    results.forEach(function (item) {
+      let card = document.createElement('div');
+      card.className = 'knowledge-result';
+      let top = document.createElement('div');
+      top.className = 'knowledge-result-head';
+      let source = document.createElement('p');
+      source.className = 'knowledge-source';
+      source.textContent = item.source || 'documento';
+      source.title = item.source || '';
+      top.appendChild(source);
+      let score = document.createElement('span');
+      score.className = 'knowledge-score';
+      let similarity = Math.max(0, Math.min(1, 1 - (Number(item.distance) || 0) / 2));
+      score.textContent = 'relevância ' + Math.round(similarity * 100) + '%';
+      score.title = 'distância: ' + item.distance;
+      top.appendChild(score);
+      card.appendChild(top);
+      let snippet = document.createElement('p');
+      snippet.className = 'knowledge-snippet';
+      snippet.textContent = item.text || '';
+      card.appendChild(snippet);
+      box.appendChild(card);
+    });
+  }
+
+  function runKnowledgeSearch() {
+    let query = $('#knowledgeQuery').value.trim();
+    if (!query) { $('#knowledgeQuery').focus(); return; }
+    let box = $('#knowledgeResults');
+    box.hidden = false;
+    box.innerHTML = '<p class="settings-note" style="margin:0">Buscando na base…</p>';
+    api('/knowledge/search', { method: 'POST', body: JSON.stringify({ query: query }) })
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        renderKnowledgeResults(query, data.results || []);
+      })
+      .catch(function (e) {
+        box.innerHTML = '';
+        let err = document.createElement('p');
+        err.className = 'settings-note';
+        err.style.margin = '0';
+        err.textContent = e && e.message ? e.message : 'Falha na busca.';
+        box.appendChild(err);
+      });
+  }
+
+  knowledgeBtn.addEventListener('click', openKnowledgeModal);
+  knowledgeClose.addEventListener('click', closeKnowledgeModal);
+  $('#knowledgeDone').addEventListener('click', closeKnowledgeModal);
+  knowledgeModal.addEventListener('click', function (e) {
+    if (e.target === knowledgeModal) closeKnowledgeModal();
+  });
+  $('#knowledgeRefresh').addEventListener('click', function () { loadKnowledgePanel(); });
+  $('#knowledgeSearchBtn').addEventListener('click', runKnowledgeSearch);
+  $('#knowledgeQuery').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); runKnowledgeSearch(); }
+  });
+  $('#knowledgeReindexAll').addEventListener('click', function () {
+    if (!confirm('Reindexar todos os documentos da base? Isso pode levar alguns minutos.')) return;
+    setKnowledgeStatus('Reindexando todos os documentos…');
+    api('/knowledge/reindex', { method: 'POST', body: JSON.stringify({}) })
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        setKnowledgeStatus((data.queued || 0) + ' documento(s) na fila de indexação.', 'ok');
+        loadKnowledgePanel(true);
+      })
+      .catch(function (e) {
+        setKnowledgeStatus(e && e.message ? e.message : 'Falha ao reindexar.', 'err');
+      });
+  });
+
+  (function () {
+    let drop = $('#knowledgeDrop');
+    let input = $('#knowledgeFile');
+    if (!drop || !input) return;
+    drop.addEventListener('click', function () { input.click(); });
+    drop.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+    });
+    ['dragenter', 'dragover'].forEach(function (name) {
+      drop.addEventListener(name, function (e) {
+        e.preventDefault();
+        drop.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'dragend', 'drop'].forEach(function (name) {
+      drop.addEventListener(name, function (e) {
+        e.preventDefault();
+        drop.classList.remove('dragover');
+      });
+    });
+    drop.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files) uploadKnowledgeFiles(e.dataTransfer.files);
+    });
+    input.addEventListener('change', function () {
+      uploadKnowledgeFiles(input.files);
+      input.value = '';
+    });
+  })();
+
+  $('#knowledgeOpenBtn').addEventListener('click', function () {
+    settingsModal.hidden = true;
+    stopDownloadPolling();
+    openKnowledgeModal();
+  });
+  $('#knowledgeSettingsBtn').addEventListener('click', function () {
+    closeKnowledgeModal();
+    currentTab = 'knowledge';
+    openModal();
+  });
+  $('#knowledgeSettingsRefresh').addEventListener('click', function () {
+    loadKnowledgePanel(true).then(function () { setSettingsStatus('Estado da base atualizado.', 'ok'); });
+  });
+
   /* fecha menus/modal com clique fora ou Escape */
   document.addEventListener('click', function (e) {
     modelMenu.classList.remove('open');
@@ -656,6 +1203,7 @@
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
+      closeKnowledgeModal();
       closeModal();
       closeAttach();
       modelMenu.classList.remove('open');
@@ -692,8 +1240,13 @@
 
   function api(path, opts) {
     opts = opts || {};
-    opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-    if (window.__DRIX_KEY__) opts.headers['X-Drix-Key'] = window.__DRIX_KEY__;
+    let headers = Object.assign({}, opts.headers || {});
+    // FormData precisa que o navegador defina o boundary do multipart.
+    if (!(opts.body instanceof FormData) && !headers['Content-Type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (window.__DRIX_KEY__) headers['X-Drix-Key'] = window.__DRIX_KEY__;
+    opts.headers = headers;
     return fetch('/api' + path, opts);
   }
 
@@ -1131,6 +1684,7 @@
   /*  inicialização   */
   loadModels();
   loadHistory();
+  loadKnowledgePanel(true);
   composer.focus();
 
   /*  ciclo de vida: se o serviço parar, substitui a página   */
@@ -1169,7 +1723,10 @@
         .then(function (data) {
           if (!data) { fails = 0; return; }
           fails = 0;
-          if (data.stopping === true || data.any_running === false) showStopped();
+          // Se recebemos resposta do /api/runtime, o servidor web está vivo.
+          // Fechar automaticamente só em parada explícita ou falhas repetidas
+          // de conexão, evitando falso positivo por checagem de portas.
+          if (data.stopping === true) showStopped();
         })
         .catch(function () {
           fails += 1;
