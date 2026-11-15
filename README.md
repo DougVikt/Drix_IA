@@ -6,6 +6,11 @@
 </div>
 <br>
 
+![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![OS](https://img.shields.io/badge/OS-Windows%2010%2F11-lightgrey)
+
 > **Version:** `0.1.0-alpha` · **License:** MIT · **Status:** functional, in active development
 
 Portable AI assistant: runs straight from an external HD/SSD, installing nothing on the host PC.
@@ -16,7 +21,7 @@ agents, URL media downloads, and a local knowledge base (RAG).
 
 ## Table of contents
 
-- [What it is](#what-it-is)
+- [Compatibility](#compatibility)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
@@ -26,15 +31,16 @@ agents, URL media downloads, and a local knowledge base (RAG).
 
 ---
 
-## What it is
+## Compatibility
 
-Drix is built to be **independent of the host PC**: everything it needs lives in the
-root folder of the portable drive — embedded Python, Ollama, models, data and configuration.
+| OS | Status | Notes |
+|----|--------|-------|
+| **Windows 10/11** | Full support | Launcher (`start.bat`), tray indicator, DPAPI secrets vault and embedded Ollama engine |
+| **Linux** | In development | Core and API run (Python/FastAPI); launcher, tray and vault are Windows-only today |
+| **macOS** | In development | Same as Linux |
 
-- **Local by default:** models run on the embedded engine (`ia_system/`), no internet required.
-- **Optional online providers:** OpenAI, Anthropic and any OpenAI-compatible endpoint.
-- **Privacy:** API keys live in a local vault (DPAPI on Windows) and/or environment
-  variables — never in plaintext in `config.yaml`.
+The core is platform-independent Python; the Windows-specific pieces are already isolated
+(`sys.platform` guards in `scripts/service.py` and `scripts/indicator.py`).
 
 ## Features
 
@@ -50,6 +56,8 @@ root folder of the portable drive — embedded Python, Ollama, models, data and 
 | Tools | Shell, files, memory, snapshots, MCP, skills (audio, image, video, vision) |
 
 ## Quick start
+
+Requirements: Windows 10/11, ~30 GB free on the external drive, a modern browser.
 
 ```powershell
 # 1. Plug in the external HD/SSD as F:
@@ -78,6 +86,7 @@ Detailed guides live in [`docs/`](./docs), kept separate so the README stays sho
 |-----------|----------------------|
 | [`docs/CREATION.md`](./docs/CREATION.md) | Understand how Drix is assembled, recreate the environment from scratch, folder structure and builds |
 | [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | Configure everything: `config.yaml`, environment variables, API keys, permissions, network |
+| [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) | See what changed in this version |
 | [`DADOS_DEV/`](./DADOS_DEV/) | Development documentation (history, full reference, status) — **local, not versioned** |
 
 ## Project structure

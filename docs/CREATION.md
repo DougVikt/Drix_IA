@@ -20,7 +20,10 @@
 
 ## Prerequisites
 
-- **Windows 10/11** (full experience) or partial Linux support.
+## Prerequisites
+
+- **Windows 10/11** (full experience). Linux/macOS: core and API run, but the launcher,
+  tray indicator and DPAPI vault are Windows-only — see [Compatibility](README.md#compatibility) in the README.
 - **External HD/SSD** with at least 30 GB free (heavy models require much more).
 - **Python 3.10+** (the embedded environment uses Python 3.10.11).
 - **Git** (optional on the portable drive, required to contribute).
