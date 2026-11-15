@@ -6,6 +6,7 @@ import os
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -22,6 +23,13 @@ _DEFAULT_PORT = 11434
 _DEFAULT_HOST = "127.0.0.1"
 
 _proc: subprocess.Popen | None = None
+
+# Background model warmup queue.  Rapid model changes keep only the newest
+# selection, and warmup yields while an answer is being generated.
+_preload_lock = threading.Lock()
+_preload_event = threading.Event()
+_preload_pending: dict | None = None
+_preload_started = False
 
 if os.name == "nt":
     _SI = subprocess.STARTUPINFO()
@@ -239,18 +247,71 @@ def selected_model() -> str:
         return ""
 
 
+def _model_size_bytes(name: str) -> int:
+    """On-disk size of a model, used as a rough RAM estimate."""
+    try:
+        import httpx
+        resp = httpx.get(
+            f"http://127.0.0.1:{engine_port()}/api/tags", timeout=5.0
+        )
+        resp.raise_for_status()
+        for item in resp.json().get("models") or []:
+            if str(item.get("name") or "") == name:
+                return int(item.get("size") or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def model_fits_ram(model: str | None = None) -> bool:
+    """False when a model is clearly too large for this machine.
+
+    A 7.6 GB model does not fit in 10 GB of RAM together with Windows and
+    the other loaded models.  Warming it only blocks the engine for minutes
+    and then fails; the chat itself can still try, but background warmup
+    must not waste that time.
+    """
+    name = (model or selected_model()).strip()
+    if not name:
+        return False
+    size = _model_size_bytes(name)
+    if not size:
+        return True
+    try:
+        total = float(psutil.virtual_memory().total)
+    except Exception:
+        return True
+    # Leave room for Windows, the web app and any model already loaded.
+    return size <= total * 0.72
+
+
 def preload_model(model: str | None = None, keep_alive: str | int = -1,
-                  timeout: float = 240.0, system: str = "") -> bool:
+                  timeout: float = 120.0, system: str = "",
+                  messages: list[dict] | None = None) -> bool:
     """Load the chat model into RAM before the first user message.
 
     Loading a 2-4 GB model from the external HD takes 40-90 s on this
     hardware.  Doing it while the page is still opening removes that wait
     from the first answer.
+
+    ``messages`` can carry the current conversation prefix (system + history)
+    so the new model also warms its KV cache, not just the weights.
     """
     if not port_in_use():
         return False
     name = (model or selected_model()).strip()
     if not name:
+        return False
+    if not model_fits_ram(name):
+        try:
+            from core import logs
+            total_gb = psutil.virtual_memory().total / (1024 ** 3)
+            logs.warn(
+                f"Model {name} is too large for {total_gb:.1f} GB RAM; "
+                "preload skipped"
+            )
+        except Exception:
+            pass
         return False
     try:
         import httpx
@@ -263,13 +324,14 @@ def preload_model(model: str | None = None, keep_alive: str | int = -1,
         if params.get("threads"):
             options["num_thread"] = int(params["threads"])
         url = f"http://127.0.0.1:{engine_port()}/api/chat"
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": "ok"})
+        payload_messages = list(messages or [])
+        if not payload_messages:
+            if system:
+                payload_messages.append({"role": "system", "content": system})
+            payload_messages.append({"role": "user", "content": "ok"})
         payload = {
             "model": name,
-            "messages": messages,
+            "messages": payload_messages,
             "stream": False,
             "keep_alive": keep_alive,
             "options": options,
@@ -279,6 +341,141 @@ def preload_model(model: str | None = None, keep_alive: str | int = -1,
         return True
     except Exception:
         return False
+
+
+def request_preload(model: str | None = None, keep_alive: str | int = -1,
+                    message_builder=None) -> bool:
+    """Queue a background warmup for the newest selected model.
+
+    ``message_builder`` is evaluated right before the request, so a model
+    changed during a long answer is warmed with the conversation as it is
+    when the answer finishes.
+    """
+    global _preload_pending, _preload_started
+    name = (model or selected_model()).strip()
+    if not name:
+        return False
+    if not model_fits_ram(name):
+        try:
+            from core import logs
+            logs.warn(f"Model warmup skipped: {name} does not fit in RAM")
+        except Exception:
+            pass
+        return False
+    job = {
+        "model": name,
+        "keep_alive": keep_alive,
+        "builder": message_builder,
+        "created": time.time(),
+    }
+    with _preload_lock:
+        _preload_pending = job
+        if not _preload_started:
+            _preload_started = True
+            threading.Thread(
+                target=_preload_worker, daemon=True, name="drix-model-warmup"
+            ).start()
+    _preload_event.set()
+    return True
+
+
+def _chat_state() -> dict:
+    try:
+        from core import runtime as _runtime
+        return _runtime.chat_state()
+    except Exception:
+        return {}
+
+
+def _preload_worker() -> None:
+    global _preload_pending
+    while True:
+        _preload_event.wait()
+        _preload_event.clear()
+        while True:
+            with _preload_lock:
+                job = _preload_pending
+                _preload_pending = None
+            if not job:
+                break
+
+            # Debounce: a second click within this window replaces the job
+            # instead of loading two models.  Six seconds also gives the
+            # user time to send the next message; an active answer always wins.
+            deadline = time.time() + 6.0
+            while time.time() < deadline:
+                time.sleep(0.25)
+                with _preload_lock:
+                    if _preload_pending is not None:
+                        break
+            with _preload_lock:
+                if _preload_pending is not None:
+                    continue
+
+            # Never compete with a response being generated.
+            while True:
+                state = _chat_state()
+                if int(state.get("active", 0) or 0) == 0:
+                    break
+                with _preload_lock:
+                    if _preload_pending is not None:
+                        break
+                time.sleep(0.5)
+            with _preload_lock:
+                if _preload_pending is not None:
+                    continue
+
+            # A chat that started after this model was selected already
+            # loaded and used the model itself.  Warming on top of it would
+            # only queue another request behind that answer.
+            state = _chat_state()
+            if float(state.get("last_started", 0) or 0) > float(
+                job.get("created", 0) or 0
+            ):
+                continue
+
+            if selected_model() != job["model"]:
+                continue
+            if not model_fits_ram(job["model"]):
+                try:
+                    from core import logs
+                    logs.warn(
+                        f"Model warmup skipped: {job['model']} does not fit in RAM"
+                    )
+                except Exception:
+                    pass
+                continue
+
+            messages = None
+            builder = job.get("builder")
+            if builder is not None:
+                try:
+                    messages = builder()
+                except Exception:
+                    messages = None
+            if selected_model() != job["model"]:
+                continue
+
+            # Last check right before the blocking request: if a message
+            # arrived while the prefix was being built, let the chat win.
+            if int(_chat_state().get("active", 0) or 0) > 0:
+                continue
+
+            started = time.time()
+            ok = preload_model(
+                job["model"],
+                keep_alive=job["keep_alive"],
+                messages=messages,
+            )
+            try:
+                from core import logs
+                scope = f", {len(messages)} mensagens" if messages else ""
+                logs.info(
+                    f"Model warmup {'ok' if ok else 'failed'}: "
+                    f"{job['model']} ({time.time() - started:.1f}s{scope})"
+                )
+            except Exception:
+                pass
 
 
 def sync_models() -> None:
