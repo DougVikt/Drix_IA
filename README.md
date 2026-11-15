@@ -1,119 +1,118 @@
-# Drix — IA Portátil
-<div align="center">
-<img src="ia_system/icon/logo_drix2.png" height="90" alt="Icone Drix">
+# Drix — Portable AI
+
+<div  align="center">
+<img src="ia_system/icon/logo_drix2.png" height="90" alt="Drix icon">
 <img src="ia_system/icon/logo_nome_drix.png" height="80" alt="Drix">
 </div>
 <br>
 
-> **Versão:** `0.1.0-alpha` · **Licença:** MIT · **Status:** funcional, em desenvolvimento ativo
+> **Version:** `0.1.0-alpha` · **License:** MIT · **Status:** functional, in active development
 
-Assistente de IA **portátil**: roda direto de um HD/SSD externo, sem instalar nada no PC hospedeiro.
-Motor Ollama embarcado, interface web leve, modo terminal e headless, memória persistente,
-agentes, downloads por URL e base de conhecimento local (RAG).
-
----
-
-## Sumário
-
-- [O que é](#o-que-é)
-- [Recursos](#recursos)
-- [Início rápido](#início-rápido)
-- [Documentação](#documentação)
-- [Estrutura do projeto](#estrutura-do-projeto)
-- [Segurança](#segurança)
-- [Licença](#licença)
+Portable AI assistant: runs straight from an external HD/SSD, installing nothing on the host PC.
+Embedded Ollama engine, lightweight web UI, terminal and headless modes, persistent memory,
+agents, URL media downloads, and a local knowledge base (RAG).
 
 ---
 
-## O que é
+## Table of contents
 
-A Drix foi criada para ser **independente do PC hospedeiro**: tudo o que ela precisa fica na
-pasta raiz do disco portátil — Python embarcado, Ollama, modelos, dados e configuração.
+- [What it is](#what-it-is)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Documentation](#documentation)
+- [Project structure](#project-structure)
+- [Security](#security)
+- [License](#license)
 
-- **Modo local por padrão:** modelos rodam no motor embarcado (`ia_system/`), sem internet.
-- **Provedores online opcionais:** OpenAI, Anthropic e qualquer endpoint OpenAI-compatible.
-- **Privacidade:** chaves de API ficam em cofre local (DPAPI no Windows) e/ou variáveis de
-  ambiente — nunca em texto plano no `config.yaml`.
+---
 
-## Recursos
+## What it is
 
-| Área | O que faz |
+Drix is built to be **independent of the host PC**: everything it needs lives in the
+root folder of the portable drive — embedded Python, Ollama, models, data and configuration.
+
+- **Local by default:** models run on the embedded engine (`ia_system/`), no internet required.
+- **Optional online providers:** OpenAI, Anthropic and any OpenAI-compatible endpoint.
+- **Privacy:** API keys live in a local vault (DPAPI on Windows) and/or environment
+  variables — never in plaintext in `config.yaml`.
+
+## Features
+
+| Area | What it does |
 |------|-----------|
-| Chat | Streaming SSE, histórico por workspace, anexos, tema claro/escuro |
-| Modelos | Seleção por hardware, troca otimizada, pré-carregamento em background |
-| Agentes | Tool calling com permissões, subagentes (`coder`, `researcher`, `summarizer`) |
-| Memória | SQLite + Chroma, consolidação em segundo plano, compactação de contexto |
-| Web | Busca/fetch com política de rede e bloqueio SSRF, conteúdo tratado como não confiável |
-| Downloads | yt-dlp + ffmpeg portátil: vídeo/áudio por URL, fila, progresso e cancelamento |
-| Conhecimento | RAG local em SQLite: upload de PDF/DOCX/TXT/…, busca semântica, fontes citadas no chat |
-| Ferramentas | Shell, arquivos, memória, snapshots, MCP, skills (áudio, imagem, vídeo, visão) |
+| Chat | SSE streaming, per-workspace history, attachments, light/dark theme |
+| Models | Hardware-based selection, optimized switch, background preload |
+| Agents | Tool calling with permissions, subagents (`coder`, `researcher`, `summarizer`) |
+| Memory | SQLite + Chroma, background consolidation, context compaction |
+| Web | Search/fetch with network policy and SSRF blocking, content treated as untrusted |
+| Downloads | yt-dlp + portable ffmpeg: video/audio by URL, queue, progress and cancel |
+| Knowledge | Local RAG in SQLite: upload PDF/DOCX/TXT/…, semantic search, sources cited in chat |
+| Tools | Shell, files, memory, snapshots, MCP, skills (audio, image, video, vision) |
 
-## Início rápido
+## Quick start
 
 ```powershell
-# 1. Conecte o HD/SSD externo como F:
-# 2. Execute o launcher
+# 1. Plug in the external HD/SSD as F:
+# 2. Run the launcher
 F:\start.bat
-
-# 3. Escolha o modo: web, terminal ou headless
-# 4. No modo web, o navegador abre em http://127.0.0.1:8000
 ```
 
-> Copiou o repo para uma máquina nova? Antes de rodar, monte os componentes portáteis (WinPython, Ollama, modelos) seguindo [docs/CRIACAO.md](./docs/CRIACAO.md#montando-o-ambiente-do-zero).
+> New machine? First set up the portable components (WinPython, Ollama, models) following
+> [`docs/CREATION.md`](./docs/CREATION.md#setting-up-from-scratch).
 
-Para parar, use **Parar tudo** no painel de serviços (indicador). Nunca feche a janela do
-indicador pelo X — o fechamento está desabilitado de propósito para forçar a parada segura.
+To stop, use **Stop all** in the services panel (indicator). Never close the indicator window
+with the X — closing is disabled on purpose to force a safe stop.
 
-Verificação rápida:
+Quick check:
 
 ```powershell
 Test-NetConnection 127.0.0.1 -Port 8000   # API/web
 Test-NetConnection 127.0.0.1 -Port 11434  # Ollama
 ```
 
-## Documentação
+## Documentation
 
-Os guias detalhados ficam em [`docs/`](./docs), separados para o README não ficar enorme:
+Detailed guides live in [`docs/`](./docs), kept separate so the README stays short:
 
-| Documento | Use quando quiser... |
+| Document | Use when you want to... |
 |-----------|----------------------|
-| [`docs/CRIACAO.md`](./docs/CRIACAO.md) | Entender como a Drix é montada, recriar o ambiente do zero, estrutura de pastas e builds |
-| [`docs/CONFIGURACAO.md`](./docs/CONFIGURACAO.md) | Configurar tudo: `config.yaml`, variáveis de ambiente, chaves de API, permissões, rede |
-| [`DADOS_DEV/`](./DADOS_DEV/) | Documentação de desenvolvimento (histórico, referência completa, status) — **local, não versionada** |
+| [`docs/CREATION.md`](./docs/CREATION.md) | Understand how Drix is assembled, recreate the environment from scratch, folder structure and builds |
+| [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | Configure everything: `config.yaml`, environment variables, API keys, permissions, network |
+| [`DADOS_DEV/`](./DADOS_DEV/) | Development documentation (history, full reference, status) — **local, not versioned** |
 
-## Estrutura do projeto
+## Project structure
 
 ```
 F:\
-├── api/            # FastAPI: auth, engine, rotas REST
-├── client/         # Cliente Drix (terminal/API)
-├── config/         # config.yaml (configuração principal)
-├── core/           # Núcleo: agent, providers, tools, memory, downloader, knowledge...
-├── data/           # Dados persistentes (conversas, memórias, secrets, knowledge)
-├── docs/           # Guias do usuário (criação e configuração)
-├── ia_system/      # Ollama portátil + modelos + Python embarcado
+├── api/            # FastAPI: auth, engine, REST routes
+├── client/         # Drix client (terminal/API)
+├── config/         # config.yaml (main configuration)
+├── core/           # Core: agent, providers, tools, memory, downloader, knowledge...
+├── data/           # Persistent data (conversations, memories, secrets, knowledge)
+├── docs/           # User guides (creation and configuration)
+├── ia_system/      # Portable Ollama + models + embedded Python
 ├── logs/           # drx.log / all.log
 ├── scripts/        # start.py, service.py, indicator.py, update_dump.py
-├── skills/         # Skills instaladas
-├── tests/          # Testes (unittest)
-├── ui/             # Interface web (front) + web_app.py
-├── workspace/      # Área de trabalho; downloads/ por padrão
-├── .venv/          # Ambiente virtual
+├── skills/         # Installed skills
+├── tests/          # Tests (unittest)
+├── ui/             # Web interface (front) + web_app.py
+├── workspace/      # Work area; downloads/ by default
+├── .venv/          # Virtual environment
 ├── Makefile
-├── pyproject.toml  # Poetry · versão 0.1.0-alpha
+├── pyproject.toml  # Poetry · version 0.1.0-alpha
 └── start.bat       # Launcher
 ```
 
-## Segurança
+## Security
 
-- Autenticação por API key + cookie `HttpOnly`/`SameSite=Strict`; CSRF por mesma origem.
-- Rate limit (60 req/min geral, 30 req/min chat); polling isento de cota.
-- SSRF: bloqueio de IPs privados/loopback e lista de domínios permitidos.
-- Segredos em `data/secrets.json` (DPAPI, oculto no Windows) ou env vars
+- API key auth + `HttpOnly`/`SameSite=Strict` cookie; CSRF by same origin.
+- Rate limit (60 req/min general, 30 req/min chat); polling exempt.
+- SSRF: private/loopback IP blocking and allowed-domains list.
+- Secrets in `data/secrets.json` (DPAPI, hidden on Windows) or env vars
   (`DRIX_SECURITY_API_KEY`, `DRIX_<PROVIDER>_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
-- Conteúdo web e trechos de conhecimento são tratados como **não confiáveis** nos prompts.
-- Detalhes em [`docs/CONFIGURACAO.md`](./docs/CONFIGURACAO.md#segurança-e-chaves).
+- Web content and knowledge snippets are treated as **untrusted** in prompts.
+- Details in [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md#security-and-keys).
 
-## Licença
+## License
 
-MIT — veja [`LICENSE`](./LICENSE).
+MIT — see [`LICENSE`](./LICENSE).
