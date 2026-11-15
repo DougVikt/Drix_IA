@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "Drix"
 version = "0.1.0"
 description = "Ia portatil , versatil e escalavel"
@@ -21,20 +21,28 @@ dependencies = [
     "onnxruntime (==1.16.3)",
     "langchain-ollama (>=1.1.0,<2.0.0)",
     "langchain-chroma (>=1.1.0,<2.0.0)",
+    "pypdf (>=7.1.0,<8.0.0)",
+    "docx2txt (>=0.9,<1.0)",
     "openai-whisper (>=20250625,<20250626)",
     "psutil (>=7.2.2,<8.0.0)",
     "customtkinter (>=6.0.0,<7.0.0)",
     "darkdetect (>=0.8.0,<0.9.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "html2text (>=2025.4.15,<2026.0.0)",
+    "imageio-ffmpeg (>=0.6.0,<1.0.0)",
+    "yt-dlp (>=2026.10.21,<2027.0.0)",
     "duckduckgo-search (>=8.1.1,<9.0.0)",
     "rich (>=15.0.0,<16.0.0)",
-    "python-multipart (>=0.0.32,<0.1.0)",\n]\n\n[project.optional-dependencies]\nmem0 = ["mem0ai>=2.0.0"]\nvoice = ["pyttsx3>=2.90,<3.0"]
+    "python-multipart (>=0.0.32,<0.1.0)",
+]
+
+[project.optional-dependencies]
+mem0 = ["mem0ai>=2.0.0"]
+voice = ["pyttsx3>=2.90,<3.0"]
 
 [tool.poetry]
-package-mode = false 
+package-mode = false
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
