@@ -1,5 +1,7 @@
 # Drix — IA Portátil
 
+<img src='ia_system/icon/logo_drix2.png' width=300>
+
 ![nome drix](ia_system/icon/logo_nome_drix.png)
 
 > **Versão:** `0.1.0-alpha` · **Licença:** MIT · **Status:** funcional, em desenvolvimento ativo
@@ -55,6 +57,8 @@ F:\start.bat
 # 3. Escolha o modo: web, terminal ou headless
 # 4. No modo web, o navegador abre em http://127.0.0.1:8000
 ```
+
+> Copiou o repo para uma máquina nova? Antes de rodar, monte os componentes portáteis (WinPython, Ollama, modelos) seguindo [docs/CRIACAO.md](./docs/CRIACAO.md#montando-o-ambiente-do-zero).
 
 Para parar, use **Parar tudo** no painel de serviços (indicador). Nunca feche a janela do
 indicador pelo X — o fechamento está desabilitado de propósito para forçar a parada segura.
