@@ -54,6 +54,14 @@ async def run(query: str, conv_mgr=None, *, workspace: str = "default",
         from . import subagents as _subagents  # noqa: F401
     except Exception:
         pass
+    try:
+        from . import downloader as _downloader  # noqa: F401
+    except Exception:
+        pass
+    try:
+        from . import knowledge as _knowledge  # noqa: F401
+    except Exception:
+        pass
 
     cfg = cfg if cfg is not None else _snapshot_cfg()
     prompt = await _build_prompt(query, conv_mgr)
