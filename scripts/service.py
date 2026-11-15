@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -94,6 +95,38 @@ def _spawn_indicator() -> None:
         logs.info(f"Indicator started (pid {pid})")
 
 
+def _wait_http(host: str, port: int, timeout: float = 90.0) -> bool:
+    """Wait until the web app answers HTTP, not just until the port opens."""
+    probe = "127.0.0.1" if host in ("", "0.0.0.0", "::") else host
+    url = f"http://{probe}:{port}/"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with opener.open(url, timeout=2.0) as resp:
+                if int(getattr(resp, "status", 200)) < 500:
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.4)
+    return False
+
+
+def _run_web_mode():
+    """Start the server, wait until the UI responds, then open the browser."""
+    server = _start_server()
+    _spawn_indicator()
+    if not WEB.get("auto_open", True):
+        return server
+    ready = _wait_http(HOST, PORT, timeout=90.0)
+    if ready:
+        logs.info(f"Web server ready; opening browser at http://{HOST}:{PORT}")
+        webbrowser.open(f"http://{HOST}:{PORT}")
+    else:
+        logs.warn("Web server did not become ready; browser not opened")
+    return server
+
+
 def _warm_up() -> None:
     """Load the model and the memory/RAG caches before the first message.
 
@@ -113,7 +146,9 @@ def _warm_up() -> None:
         system = lang.get("system_prompt")
     except Exception:
         system = ""
-    if engine.preload_model(model, keep_alive=keep_alive, system=system):
+    if not engine.model_fits_ram(model):
+        logs.warn(f"Model preload skipped: {model} does not fit in RAM")
+    elif engine.preload_model(model, keep_alive=keep_alive, system=system):
         # Prime the KV cache for the real system prompt so the first answer
         # does not have to process it from scratch.
         engine.preload_model(model, keep_alive=keep_alive, system=system)
@@ -222,11 +257,10 @@ def main() -> int:
                 time.sleep(1)
             return 0
 
-        # web mode
-        _spawn_indicator()
-        if WEB.get("auto_open", True):
-            threading.Timer(1.2, lambda: webbrowser.open(f"http://{HOST}:{PORT}")).start()
-        server = _start_server()
+        # web mode: só abre o navegador depois que o servidor estiver
+        # aceitando conexões.  Abrir antes mostra uma aba sem resposta
+        # enquanto Mem0/modelo ainda estão inicializando.
+        server = _run_web_mode()
         while True:
             time.sleep(1)
         return 0
