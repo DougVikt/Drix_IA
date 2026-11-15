@@ -50,6 +50,13 @@ compaction:
   keep_recent: 8
   max_tokens: 2000
   use_llm: false
+downloads:
+  cookies: ''
+  dir: ./workspace/downloads
+  enabled: true
+  ffmpeg: ''
+  max_concurrent: 2
+  proxy: ''
 engine:
   auto_start: true
   host: 127.0.0.1
@@ -62,6 +69,15 @@ history:
   db_path: ./data/conversations.db
   enabled: true
   max_conversations: 50
+knowledge:
+  chunk_overlap: 200
+  chunk_size: 1000
+  context_chars: 1800
+  db: ./data/knowledge_db
+  dir: ./data/knowledge
+  enabled: true
+  max_file_mb: 50
+  top_k: 4
 language: en
 local_resources:
   use_gpu: true
@@ -108,7 +124,7 @@ security:
   allowed_folders:
   - '%USERPROFILE%/Desktop'
   - '%USERPROFILE%/Documents'
-  api_key: ""  # use {env:DRIX_SECURITY_API_KEY} ou core.secrets
+  api_key: ''
 skills:
   allow_self_create: false
   audio_skill: true
@@ -136,7 +152,14 @@ tools:
   max_steps: 6
   permissions:
     delegate: allow
+    download_cancel: allow
+    download_info: allow
+    download_list: allow
+    download_media: ask
+    download_status: allow
     fetch_url: allow
+    knowledge_list: allow
+    knowledge_search: allow
     list_directory: allow
     list_subagents: allow
     mcp_call: allow
