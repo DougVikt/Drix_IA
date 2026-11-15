@@ -1,3 +1,5 @@
+![logo](../ia_system/icon/logo_drix2.png)
+
 # docs
 
 Guias de usuário da Drix.
