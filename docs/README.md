@@ -1,4 +1,4 @@
-![logo](../ia_system/icon/logo_drix2.png)
+<img src='../ia_system/icon/logo_drix2.png' width=300>
 
 # docs
 
