@@ -1,6 +1,6 @@
 [project]
 name = "Drix"
-version = "0.1.0"
+version = "0.1.0-alpha"
 description = "Ia portatil , versatil e escalavel"
 authors = [
     {name = "dougvikt"}
