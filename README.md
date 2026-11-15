@@ -1,5 +1,7 @@
 # Drix — IA Portátil
 
+![nome drix](ia_system/icon/logo_nome_drix.png)
+
 > **Versão:** `0.1.0-alpha` · **Licença:** MIT · **Status:** funcional, em desenvolvimento ativo
 
 Assistente de IA **portátil**: roda direto de um HD/SSD externo, sem instalar nada no PC hospedeiro.
@@ -83,7 +85,6 @@ F:\
 ├── config/         # config.yaml (configuração principal)
 ├── core/           # Núcleo: agent, providers, tools, memory, downloader, knowledge...
 ├── data/           # Dados persistentes (conversas, memórias, secrets, knowledge)
-├── DADOS_DEV/      # Docs de desenvolvimento (gitignored)
 ├── docs/           # Guias do usuário (criação e configuração)
 ├── ia_system/      # Ollama portátil + modelos + Python embarcado
 ├── logs/           # drx.log / all.log
