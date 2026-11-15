@@ -1,8 +1,9 @@
 # Drix — IA Portátil
+<div align="center">
+<img src="ia_system/icon/logo_drix2.png" height="90" alt="Icone Drix">
+<img src="ia_system/icon/logo_nome_drix.png" height="80" alt="Drix">
+</div>
 
-<img src='ia_system/icon/logo_drix2.png' width=300>
-
-![nome drix](ia_system/icon/logo_nome_drix.png)
 
 > **Versão:** `0.1.0-alpha` · **Licença:** MIT · **Status:** funcional, em desenvolvimento ativo
 
