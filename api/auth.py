@@ -63,23 +63,29 @@ class AuthMiddleware:
         self.rate_limit = rate_limit
         self.chat_rate_limit = chat_rate_limit
         self.protected = tuple(p if p.endswith("/") else p + "/" for p in protected_prefixes)
-        self._requests: dict[str, list[float]] = defaultdict(list)
+        # Counters are split per bucket so the UI's lightweight polling never
+        # consumes the chat quota (and vice versa).
+        self._requests: dict[tuple[str, str], list[float]] = defaultdict(list)
 
     def _is_protected(self, path: str) -> bool:
         p = path.rstrip("/") + "/"
         return any(p.startswith(prefix) for prefix in self.protected)
 
-    def _rate_limited(self, ip: str, path: str) -> bool:
-        # The UI polls runtime status every second; it is lightweight and must
-        # never be throttled or the page would think the service had stopped.
-        if path.rstrip("/") == "/api/runtime":
+    def _rate_limited(self, ip: str, path: str, method: str = "GET") -> bool:
+        clean = path.rstrip("/")
+        # The UI polls these lightweight, authenticated endpoints; throttling
+        # them would make the page think the service stopped or hide downloads.
+        if method == "GET" and clean in ("/api/runtime", "/api/downloads",
+                                         "/api/knowledge"):
             return False
-        limit = self.chat_rate_limit if path.rstrip("/") == "/api/chat" else self.rate_limit
+        bucket = "chat" if clean == "/api/chat" else "api"
+        limit = self.chat_rate_limit if bucket == "chat" else self.rate_limit
         if limit <= 0:
             return False
+        key = (ip, bucket)
         now = time.time()
-        stamps = [t for t in self._requests[ip] if now - t < 60]
-        self._requests[ip] = stamps
+        stamps = [t for t in self._requests[key] if now - t < 60]
+        self._requests[key] = stamps
         if len(stamps) >= limit:
             return True
         stamps.append(now)
@@ -118,7 +124,7 @@ class AuthMiddleware:
                     logs.warn(f"API unauthorized {request.method} {path} ip={ip}")
                 return JSONResponse({"detail": "Unauthorized", "reason": reason}, status_code=401)
 
-        if self._rate_limited(ip, path):
+        if self._rate_limited(ip, path, request.method):
             logs.warn(f"API rate-limited {request.method} {path} ip={ip}")
             return JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
 
