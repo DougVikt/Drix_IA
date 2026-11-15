@@ -1,10 +1,14 @@
 import httpx
 import html2text
 import ipaddress
+import re
 import socket
+import threading
+import time
+import xml.etree.ElementTree as ET
 import yaml
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 from duckduckgo_search import DDGS
 
 from core import logs
@@ -102,6 +106,151 @@ def check_url(url: str, net: dict = None) -> str:
     return hostname
 
 
+_STOPWORDS = {
+    "a", "o", "as", "os", "um", "uma", "uns", "umas",
+    "de", "da", "do", "das", "dos", "e", "em", "na", "no", "nas", "nos",
+    "por", "para", "pra", "com", "sobre", "que", "se",
+    "me", "minha", "meu", "favor",
+    "the", "an", "of", "to", "for", "and", "in", "on", "please",
+}
+
+
+def _clean_query(query: str) -> str:
+    """Turn a spoken request into a search query.
+
+    DuckDuckGo returns zero results for full sentences such as
+    "Pesquise na internet e me diga uma notícia...".  Stripping the command
+    part leaves the actual subject and makes the search work.
+    """
+    original = " ".join(str(query or "").split())
+    if not original:
+        return ""
+    q = original
+    q = re.sub(r"^\s*(por favor[,\s]+)?", "", q, flags=re.I)
+    q = re.sub(
+        r"^\s*(pesquise|pesquisar|busque|buscar|procure|procurar|"
+        r"search(?:\s+the\s+web)?|look\s+up|google)\b[:\s,]*",
+        "", q, flags=re.I,
+    )
+    q = re.sub(
+        r"^\s*(na\s+internet|na\s+web|online|no\s+google|no\s+navegador)"
+        r"\b[:\s,]*", "", q, flags=re.I,
+    )
+    q = re.sub(
+        r"^\s*(e\s+)?(me\s+)?(diga|fale|mostre|conte|informe)"
+        r"\b[:\s,]*", "", q, flags=re.I,
+    )
+    q = re.sub(
+        r"^\s*(uma|um|a|o|as|os|por|sobre|for|the|a|an)"
+        r"\b[:\s,]*", "", q, flags=re.I,
+    )
+    q = q.strip(" \t,.:;!?-\u2013\u2014")
+    return q if len(q) >= 3 else original
+
+
+def _fallback_queries(query: str) -> list[str]:
+    """Shorter keyword queries tried when the cleaned phrase finds nothing."""
+    tokens = re.findall(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_]+", query)
+    useful = [t for t in tokens if t.lower() not in _STOPWORDS and len(t) > 1]
+    candidates = []
+    if len(useful) >= 2:
+        candidates.append(" ".join(useful[-2:]))
+    if len(useful) >= 3:
+        candidates.append(" ".join(useful[-3:]))
+    return candidates
+
+
+_NEWS_WORDS = (
+    "notícia", "noticia", "notícias", "noticias",
+    "manchete", "manchetes", "news", "últimas", "ultimas",
+)
+
+_NEWS_STOPWORDS = _STOPWORDS | {
+    "notícia", "noticia", "notícias", "noticias", "manchete", "manchetes",
+    "news", "hoje", "agora", "últimas", "ultimas", "recente", "recentes",
+}
+
+
+def _is_news_query(query: str) -> bool:
+    low = str(query or "").lower()
+    return any(word in low for word in _NEWS_WORDS)
+
+
+def _news_query(query: str) -> str:
+    """Reduce "notícia de tecnologia de hoje" to "tecnologia"."""
+    tokens = re.findall(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_]+", query)
+    useful = [t for t in tokens if t.lower() not in _NEWS_STOPWORDS and len(t) > 1]
+    return " ".join(useful) if useful else query
+
+
+def _gnews_search(query: str, max_results: int) -> list:
+    """Current headlines from the Google News RSS feed."""
+    url = (
+        "https://news.google.com/rss/search?q=" + quote_plus(query or "tecnologia")
+        + "&hl=pt-BR&gl=BR&ceid=BR:pt-419"
+    )
+    timeout = _net_config()["timeout"]
+    with httpx.Client(
+        timeout=timeout,
+        follow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0"},
+    ) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+    root = ET.fromstring(resp.content)
+    results = []
+    for item in root.findall(".//item")[:max_results]:
+        title = " ".join((item.findtext("title") or "").split())
+        published = (item.findtext("pubDate") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        source = item.find("source")
+        source_name = " ".join((source.text or "").split()) if source is not None else ""
+        source_url = (source.get("url") or "").strip() if source is not None else ""
+        if not title:
+            continue
+        source_line = source_name or "Google News"
+        if source_url:
+            source_line += f" ({source_url})"
+        results.append(f"{title}\n  {source_line}\n  {published or link}")
+    return results
+
+
+def _search_once(query: str, max_results: int) -> list:
+    with DDGS() as ddgs:
+        return [
+            f"{r['title']}\n  {r['href']}\n  {r.get('body', '')}"
+            for r in ddgs.text(query, max_results=max_results)
+        ]
+
+
+_search_cache: dict[tuple[str, int], tuple[float, list]] = {}
+_search_cache_lock = threading.Lock()
+_SEARCH_CACHE_TTL = 300.0
+_SEARCH_CACHE_MAX = 64
+
+
+def _cache_get(key: tuple[str, int]):
+    now = time.monotonic()
+    with _search_cache_lock:
+        row = _search_cache.get(key)
+        if not row:
+            return None
+        stored, value = row
+        if now - stored > _SEARCH_CACHE_TTL:
+            _search_cache.pop(key, None)
+            return None
+        return list(value)
+
+
+def _cache_put(key: tuple[str, int], value: list) -> None:
+    if not value:
+        return
+    with _search_cache_lock:
+        if len(_search_cache) >= _SEARCH_CACHE_MAX:
+            _search_cache.clear()
+        _search_cache[key] = (time.monotonic(), list(value))
+
+
 def search(query: str, max_results: int = 5) -> list:
     net = _net_config()
     # Respect config permission (tools.py also checks; this keeps web.py safe as a standalone API).
@@ -115,17 +264,54 @@ def search(query: str, max_results: int = 5) -> list:
         # If config can't be read, fail closed for safety.
         logs.warn(f"WEB search blocked (config read error) query={query[:200]!r}")
         return ["Blocked: unable to verify network permissions"]
-    try:
-        with DDGS() as ddgs:
-            results = [
-                f"{r['title']}\n  {r['href']}\n  {r.get('body', '')}"
-                for r in ddgs.text(query, max_results=max_results)
-            ]
-        logs.info(f"WEB search query={query[:200]!r} results={len(results)}")
-        return results
-    except Exception as e:
-        logs.warn(f"WEB search failed query={query[:200]!r}: {e}")
-        return [f"Search failed: {e}"]
+
+    cleaned = _clean_query(query)
+    cache_key = (query, max_results)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        logs.info(f"WEB search cache input={query[:120]!r} results={len(cached)}")
+        return cached
+
+    last_error = None
+
+    if _is_news_query(query):
+        news_query = _news_query(cleaned)
+        try:
+            news = _gnews_search(news_query, max_results)
+        except Exception as e:
+            last_error = e
+            news = []
+        logs.info(
+            f"WEB news input={query[:120]!r} query={news_query[:200]!r} "
+            f"results={len(news)}"
+        )
+        if news:
+            _cache_put(cache_key, news)
+            return news
+
+    attempts = [cleaned]
+    for candidate in _fallback_queries(cleaned):
+        if candidate and candidate not in attempts:
+            attempts.append(candidate)
+
+    for attempt in attempts:
+        try:
+            results = _search_once(attempt, max_results)
+        except Exception as e:
+            last_error = e
+            results = []
+        logs.info(
+            f"WEB search input={query[:120]!r} query={attempt[:200]!r} "
+            f"results={len(results)}"
+        )
+        if results:
+            _cache_put(cache_key, results)
+            return results
+
+    if last_error is not None:
+        logs.warn(f"WEB search failed query={cleaned[:200]!r}: {last_error}")
+        return [f"Search failed: {last_error}"]
+    return []
 
 
 def fetch(url: str, timeout: int = None) -> str:
