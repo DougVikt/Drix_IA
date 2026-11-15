@@ -227,9 +227,9 @@ ia_system/bin/
 ia_system/poetry_cache/
 !ia_system/icon/
 
-# Generated data
-data/vector_db/
-data/hardware_cache.json
+# Generated data (runtime local do HD portatil)
+data/*
+!data/README.md
 logs/
 workspace/
 backups/
@@ -242,7 +242,7 @@ System Volume Information/
 .chainlit/
 .files/
 
-# DocumentaÁ„o local de desenvolvimento (n„o versionar)
+# Documenta√ß√£o local de desenvolvimento (n√£o versionar)
 DADOS_DEV/
 
 # Dumps / artefatos locais
