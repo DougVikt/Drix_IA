@@ -6,12 +6,12 @@
 </div>
 <br>
 
-![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue)
+![Version](https://img.shields.io/badge/version-0.2.0--alpha-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![OS](https://img.shields.io/badge/OS-Windows%2010%2F11-lightgrey)
 
-> **Version:** `0.1.0-alpha` · **License:** MIT · **Status:** functional, in active development
+> **Version:** `0.2.0-alpha` · **License:** MIT · **Status:** functional, in active development
 
 Portable AI assistant: runs straight from an external HD/SSD, installing nothing on the host PC.
 Embedded Ollama engine, lightweight web UI, terminal and headless modes, persistent memory,
@@ -144,7 +144,7 @@ F:\
 ├── workspace/      # Work area; downloads/ by default
 ├── .venv/          # Virtual environment
 ├── Makefile        # Cross-platform (Windows and Linux)
-├── pyproject.toml  # Poetry · version 0.1.0-alpha
+├── pyproject.toml  # Poetry · version 0.2.0-alpha
 ├── start.bat       # Windows launcher
 └── start.sh        # Linux/macOS launcher
 ```

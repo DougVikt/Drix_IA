@@ -1,4 +1,4 @@
-# Release Notes — v0.1.0-alpha
+# Release Notes — v0.2.0-alpha
 
 > Portable AI: runs straight from an external HD/SSD, installing nothing on the host PC.
 > Embedded Ollama engine, lightweight web UI, terminal/headless modes, persistent memory,
