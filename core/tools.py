@@ -10,7 +10,9 @@ Every tool is gated by ``config.yaml``::
         run_shell: deny
 
 ``ask`` makes the agent pause and return an approval token to the caller; the
-same call can then be retried with that token to execute it.
+same call can then be retried with that token to execute it. Decisions the user
+chooses to remember live in the host's local cache (see ``core.permissions``),
+not in ``config.yaml``; explicit rules in the config always win.
 """
 
 from __future__ import annotations
@@ -25,7 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import logs, snapshots
+from . import logs, permissions, snapshots
+from . import platform_paths
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -125,6 +128,13 @@ def _preview(name: str, arguments: dict) -> str:
         return f"gravar {len(content)} bytes em {path}"
     if name == "run_shell":
         return f"executar: {arguments.get('command', '')}"
+    if name == "maps_download":
+        return f"baixar mapa de {arguments.get('url', '?')}"
+    if name == "maps_extract":
+        preset = arguments.get("preset") or "recorte personalizado"
+        return f"extrair mapa ({preset})"
+    if name == "maps_delete":
+        return f"apagar mapa {arguments.get('name') or arguments.get('map_id') or '?'}"
     return f"{name} {json.dumps(arguments, ensure_ascii=False)[:300]}"
 
 
@@ -146,6 +156,17 @@ def _guard(name: str, arguments: dict | None, ctx: ToolContext):
                       f"(tools.permissions.{name}=deny)")
 
     if permission == "ask":
+        cached = None
+        try:
+            cached = permissions.decision_for(name, arguments)
+        except Exception as exc:  # cache never blocks tool execution
+            logs.warn(f"Permission cache read failed: {exc}")
+        if cached == "allow":
+            return tool, arguments
+        if cached == "deny":
+            logs.warn(f"Tool denied by local cache: {name}")
+            return None, (f"ERROR: ferramenta '{name}' negada por uma decisão "
+                          "lembrada no cache local de permissões")
         token = approval_token(name, arguments, ctx.workspace)
         if token not in (ctx.approvals or frozenset()):
             raise ApprovalRequired(name, arguments, token, _preview(name, arguments))
@@ -202,11 +223,7 @@ async def execute_async(name: str, arguments: dict | None, ctx: ToolContext) -> 
 # ─── Path helpers ────────────────────────────────────────────────
 
 def _resolve(path_str: str) -> Path:
-    raw = os.path.expandvars(os.path.expanduser(str(path_str or ".")))
-    path = Path(raw)
-    if not path.is_absolute():
-        path = ROOT / path
-    return path.resolve()
+    return platform_paths.expand_path(path_str or ".", base=ROOT).resolve()
 
 
 def _security(cfg: dict):
@@ -599,7 +616,7 @@ register(Tool(
 
 register(Tool(
     "run_shell",
-    "Executa um comando no shell do Windows. Desativado por padrão.",
+    "Executa um comando no shell do sistema. Desativado por padrão.",
     {
         "type": "object",
         "properties": {
