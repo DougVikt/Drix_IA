@@ -17,6 +17,7 @@ import core.knowledge as knowledge
 import core.language as lang
 import core.mcp as mcp
 import core.media as media
+import core.permissions as permissions
 import core.providers as providers
 import core.runtime as runtime
 import core.secrets as secrets
@@ -41,6 +42,18 @@ def _clean_name(value, max_len=100, extra_chars=""):
         return ""
     charset = r"\w\- ." + re.escape(extra_chars)
     if not re.fullmatch(rf"[{charset}]+", value, flags=re.UNICODE):
+        return ""
+    return value
+
+
+def _clean_workspace_name(value, max_len=100):
+    """Conversation titles accept punctuation but never path separators."""
+    value = (value or "").strip()
+    if not value or len(value) > max_len or value in (".", ".."):
+        return ""
+    if any(char in value for char in ("/", "\\")):
+        return ""
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
         return ""
     return value
 
@@ -105,6 +118,8 @@ _SETTINGS_BOOL = {
     "web.indicator",
     "downloads.enabled",
     "knowledge.enabled",
+    "maps.enabled",
+    "maps.allow_private_hosts",
 }
 
 _SETTINGS_INT = {
@@ -133,6 +148,7 @@ _SETTINGS_INT = {
     "knowledge.chunk_overlap": (0, 2000),
     "knowledge.top_k": (1, 20),
     "knowledge.context_chars": (200, 12000),
+    "maps.max_parallel_downloads": (1, 4),
 }
 
 _SETTINGS_FLOAT = {
@@ -155,6 +171,7 @@ _SETTINGS_TEXT = {
     "downloads.dir",
     "knowledge.dir",
     "knowledge.db",
+    "maps.dir",
 }
 
 # Optional text settings: an empty value means "use the automatic default".
@@ -162,6 +179,7 @@ _SETTINGS_OPTIONAL_TEXT = {
     "downloads.cookies",
     "downloads.ffmpeg",
     "downloads.proxy",
+    "maps.source_url",
 }
 
 _SETTINGS_KEYS = (
@@ -303,7 +321,7 @@ async def list_workspaces():
 @router.post("/workspaces")
 async def create_workspace(req: Request):
     body = await req.json()
-    name = _clean_name(body.get("name", ""))
+    name = _clean_workspace_name(body.get("name", ""))
     if not name:
         return JSONResponse({"detail": "Name required or invalid"}, status_code=400)
     async with _chat_lock:
@@ -312,7 +330,7 @@ async def create_workspace(req: Request):
 
 @router.delete("/workspaces/{name:path}")
 async def delete_workspace(name: str):
-    name = _clean_name(name)
+    name = _clean_workspace_name(name)
     if not name:
         return JSONResponse({"detail": "Name invalid"}, status_code=400)
     async with _chat_lock:
@@ -324,7 +342,7 @@ async def delete_workspace(name: str):
 @router.put("/workspaces/{name:path}")
 async def rename_workspace(name: str, req: Request):
     body = await req.json()
-    new_name = _clean_name(body.get("new_name", ""))
+    new_name = _clean_workspace_name(body.get("new_name", ""))
     if not new_name:
         return JSONResponse({"detail": "new_name required or invalid"}, status_code=400)
     async with _chat_lock:
@@ -467,6 +485,32 @@ async def chat(req: Request):
         return {"text": downloader.describe(job), "type": "system"}
 
     stream = body.get("stream", False)
+
+    # Comandos de mapa são determinísticos: abrem o painel certo sem passar
+    # pelo modelo e sem executar download/exclusão sem confirmação.
+    try:
+        from core.maps import intent as maps_intent
+        map_intent = maps_intent.detect(text)
+    except Exception as exc:
+        logs.warn(f"Map intent skipped: {exc}")
+        map_intent = None
+
+    if map_intent:
+        reply = str(map_intent.get("reply") or "Abrindo o painel de mapas.")
+        ui = {key: value for key, value in map_intent.items() if key != "reply"}
+        if stream:
+            async def _map_events():
+                yield "data: " + json.dumps({"t": reply}, ensure_ascii=False) + "\n\n"
+                yield "data: " + json.dumps(
+                    {"type": "ui", "ui": ui}, ensure_ascii=False
+                ) + "\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(
+                _map_events(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+        return {"text": reply, "type": "ai", "ui": ui}
 
     if stream:
         async def _event_stream():
@@ -985,6 +1029,47 @@ async def providers_delete_key(provider: str):
     provider = str(provider or "").strip().lower()
     removed = secrets.delete_secret(providers.secret_name(provider))
     return {"deleted": removed, "provider": provider}
+
+
+# ─── Cache local de permissões ───────────────────────────────
+
+@router.get("/permissions/cache")
+async def permissions_cache():
+    return {
+        "path": str(permissions.cache_path()),
+        "entries": permissions.entries(),
+    }
+
+
+@router.post("/permissions/cache")
+async def permissions_cache_add(req: Request):
+    try:
+        body = await req.json()
+    except Exception:
+        return JSONResponse({"detail": "Corpo inválido"}, status_code=400)
+    tool = _clean_name(body.get("tool", ""), max_len=60)
+    if not tool:
+        return JSONResponse({"detail": "Ferramenta inválida"}, status_code=400)
+    arguments = body.get("arguments") or {}
+    if not isinstance(arguments, dict):
+        return JSONResponse({"detail": "Argumentos inválidos"}, status_code=400)
+    try:
+        entry = permissions.remember(tool, arguments, str(body.get("decision") or ""))
+    except Exception as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+    return entry
+
+
+@router.delete("/permissions/cache/{key}")
+async def permissions_cache_forget(key: str):
+    if not permissions.forget(key):
+        return JSONResponse({"detail": "Decisão não encontrada"}, status_code=404)
+    return {"removed": True, "key": key}
+
+
+@router.delete("/permissions/cache")
+async def permissions_cache_clear():
+    return {"removed": permissions.clear()}
 
 
 # ─── Settings (painel web) ───────────────────────────────────

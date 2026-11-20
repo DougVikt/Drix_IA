@@ -76,7 +76,11 @@ class AuthMiddleware:
         # The UI polls these lightweight, authenticated endpoints; throttling
         # them would make the page think the service stopped or hide downloads.
         if method == "GET" and clean in ("/api/runtime", "/api/downloads",
-                                         "/api/knowledge"):
+                                         "/api/knowledge", "/api/maps"):
+            return False
+        # MapLibre/PMTiles make many small Range requests while panning a map;
+        # they are authenticated and local, so they must not hit the API quota.
+        if method == "GET" and clean.startswith("/api/maps/"):
             return False
         bucket = "chat" if clean == "/api/chat" else "api"
         limit = self.chat_rate_limit if bucket == "chat" else self.rate_limit

@@ -5,7 +5,12 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "config.yaml"
 
 _venv = ROOT / ".venv" / "Lib" / "site-packages"
-if _venv.exists():
+try:
+    from . import python_runtime, platform_paths
+    _venv = python_runtime.VENV_SITE
+except Exception:
+    platform_paths = None
+if _venv.exists() and str(_venv) not in sys.path:
     sys.path.insert(0, str(_venv))
 
 import yaml
@@ -55,15 +60,13 @@ def _sync_skills(cfg):
     return ""
 
 def _sync_ollama_models_list(cfg):
-    _SI_HIDDEN = subprocess.STARTUPINFO()
-    _SI_HIDDEN.dwFlags = subprocess.STARTF_USESHOWWINDOW
-    _SI_HIDDEN.wShowWindow = 0
-    _CW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+    if platform_paths is not None:
+        ollama_bin = platform_paths.ollama_binary()
+        run_kwargs = platform_paths.hidden_process_kwargs()
+    else:
+        ollama_bin = shutil.which("ollama")
+        run_kwargs = {}
 
-    ollama_bin = shutil.which("ollama")
-    fallback = ROOT / "ia_system" / "engine" / "ollama.exe"
-    if not ollama_bin and fallback.exists():
-        ollama_bin = str(fallback)
     if not ollama_bin:
         return ""
 
@@ -71,8 +74,8 @@ def _sync_ollama_models_list(cfg):
         r = subprocess.run(
             [ollama_bin, "list"],
             capture_output=True, text=True, timeout=15,
-            startupinfo=_SI_HIDDEN, creationflags=_CW,
-            env={**os.environ, "OLLAMA_MODELS": str(ROOT / "ia_system" / "models")}
+            env={**os.environ, "OLLAMA_MODELS": str(ROOT / "ia_system" / "models")},
+            **run_kwargs,
         )
         names = []
         for line in r.stdout.strip().split("\n")[1:]:

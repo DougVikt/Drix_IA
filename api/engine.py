@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import socket
 import subprocess
 import threading
@@ -13,9 +12,10 @@ from pathlib import Path
 import psutil
 import yaml
 
+from core import platform_paths
+
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "config.yaml"
-OLLAMA_BIN = ROOT / "ia_system" / "engine" / "ollama.exe"
 MODELS_DIR = ROOT / "ia_system" / "models"
 PIDFILE = ROOT / "data" / "engine.pid"
 
@@ -62,10 +62,8 @@ def engine_host() -> str:
 
 
 def _binary() -> str | None:
-    if OLLAMA_BIN.exists():
-        return str(OLLAMA_BIN)
-    found = shutil.which("ollama")
-    return found
+    found = platform_paths.ollama_binary()
+    return found or None
 
 
 def _get_env() -> dict:
