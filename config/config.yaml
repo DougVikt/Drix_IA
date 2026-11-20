@@ -78,9 +78,15 @@ knowledge:
   enabled: true
   max_file_mb: 50
   top_k: 4
-language: en
+language: pt
 local_resources:
   use_gpu: true
+maps:
+  allow_private_hosts: false
+  dir: ./data/maps
+  enabled: true
+  max_parallel_downloads: 1
+  source_url: https://build.protomaps.com/20261118.pmtiles
 mcp:
   enabled: false
   servers: {}
@@ -147,7 +153,7 @@ snapshots:
   enabled: true
   max: 20
 tools:
-  default_permission: allow
+  default_permission: ask
   enabled: true
   max_steps: 6
   permissions:
@@ -162,6 +168,14 @@ tools:
     knowledge_search: allow
     list_directory: allow
     list_subagents: allow
+    maps_delete: ask
+    maps_download: ask
+    maps_extract: ask
+    maps_info: allow
+    maps_list: allow
+    maps_open: allow
+    maps_search: allow
+    maps_status: allow
     mcp_call: allow
     mcp_list_tools: allow
     mcp_servers: allow
