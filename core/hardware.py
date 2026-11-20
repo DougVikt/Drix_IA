@@ -4,6 +4,8 @@ import subprocess
 import shutil
 from pathlib import Path
 
+from . import platform_paths
+
 _SI_HIDDEN = None
 try:
     _SI_HIDDEN = subprocess.STARTUPINFO()
@@ -12,14 +14,19 @@ try:
 except Exception:
     pass
 _CW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+_HIDDEN_KW = platform_paths.hidden_process_kwargs()
 
 _ROOT = Path(__file__).resolve().parent.parent
 CACHE_PATH = _ROOT / "data" / "hardware_cache.json"
 HOST_CACHE_PATH = None
 
-appdata = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
-if appdata:
-    HOST_CACHE_PATH = Path(appdata) / "drix_cache" / "hardware.json"
+if platform_paths.IS_WINDOWS:
+    appdata = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
+    if appdata:
+        HOST_CACHE_PATH = Path(appdata) / "drix_cache" / "hardware.json"
+else:
+    cache_base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    HOST_CACHE_PATH = Path(cache_base) / "drix" / "hardware.json"
 
 _KNOWN_TIERS = {
     "llama3.1:8b":    (12, 8, 4096),
@@ -62,6 +69,8 @@ def _detect_ram_gb():
         import psutil
         return round(psutil.virtual_memory().total / (1024 ** 3))
     except ImportError:
+        pass
+    if platform_paths.IS_WINDOWS:
         try:
             r = subprocess.run(
                 ["wmic", "memorychip", "get", "capacity"],
@@ -72,12 +81,23 @@ def _detect_ram_gb():
             return round(total / (1024 ** 3))
         except Exception:
             return 8
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return round(kb / (1024 ** 2))
+    except Exception:
+        pass
+    return 8
 
 def _detect_cpu_cores():
     try:
         import psutil
         return psutil.cpu_count(logical=True)
     except ImportError:
+        pass
+    if platform_paths.IS_WINDOWS:
         try:
             r = subprocess.run(
                 ["wmic", "cpu", "get", "NumberOfLogicalProcessors"],
@@ -88,6 +108,7 @@ def _detect_cpu_cores():
             return int(lines[0]) if lines else 4
         except Exception:
             return 4
+    return os.cpu_count() or 4
 
 def _pick_best_installed(ram_gb, tiers):
     supported = [info for ram, info in tiers if ram_gb >= ram]

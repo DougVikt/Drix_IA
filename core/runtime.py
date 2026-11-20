@@ -27,11 +27,13 @@ from pathlib import Path
 
 import psutil
 
+from . import python_runtime
+
 ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = ROOT / "data" / "runtime.json"
 STOP_FLAG = ROOT / "data" / "stopping.flag"
 INDICATOR_SCRIPT = ROOT / "scripts" / "indicator.py"
-PYTHON_EXE = ROOT / ".venv" / "Scripts" / "python.exe"
+PYTHON_EXE = Path(python_runtime.python_exe())
 
 _lock = threading.RLock()
 _heartbeat_stop: threading.Event | None = None
@@ -280,16 +282,34 @@ def spawn_indicator() -> int | None:
     """Launch the desktop indicator as a detached process."""
     if not INDICATOR_SCRIPT.exists():
         return None
-    python = PYTHON_EXE if PYTHON_EXE.exists() else Path(sys.executable)
+    # A headless Linux box (server, SSH without X forwarding) has no display:
+    # starting Tk there would only produce a traceback in the log.
+    if os.name != "nt" and not (
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    ):
+        return None
+    python = python_runtime.pythonw_exe()
+    log_path = ROOT / "logs" / "indicator_stderr.log"
     try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log = open(log_path, "a", encoding="utf-8", buffering=1)
         creation = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        creation |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        popen_kwargs = {}
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = creation
+        else:
+            popen_kwargs["start_new_session"] = True
         proc = subprocess.Popen(
-            [str(python), str(INDICATOR_SCRIPT)],
+            [python, str(INDICATOR_SCRIPT)],
             cwd=str(ROOT),
-            creationflags=creation,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            env=python_runtime.child_env(),
+            stdout=log,
+            stderr=log,
+            stdin=subprocess.DEVNULL,
+            **popen_kwargs,
         )
+        log.close()  # the child keeps its own handle
         register("indicator", pid=proc.pid)
         return proc.pid
     except Exception:

@@ -59,12 +59,24 @@ def _install_hooks():
     class _StderrLogger:
         _noisy = ("SelectableGroups", "DeprecationWarning")
         def write(self, msg):
+            if not msg:
+                return
             if msg.strip():
-                _ensure_logger().warning(f"[stderr] {msg.strip()}")
-            if not any(n in msg for n in self._noisy):
-                _old_stderr.write(msg)
+                try:
+                    _ensure_logger().warning(f"[stderr] {msg.strip()}")
+                except Exception:
+                    pass
+            if _old_stderr is not None and not any(n in msg for n in self._noisy):
+                try:
+                    _old_stderr.write(msg)
+                except Exception:
+                    pass
         def flush(self):
-            _old_stderr.flush()
+            if _old_stderr is not None:
+                try:
+                    _old_stderr.flush()
+                except Exception:
+                    pass
     sys.stderr = _StderrLogger()
 
 

@@ -7,6 +7,10 @@ os.environ.setdefault("OLLAMA_MODELS", str(ROOT / "ia_system" / "models"))
 
 import core.hardware as hardware
 import yaml
+from core import python_runtime
+from core import platform_paths
+
+platform_paths.disable_console_close()
 
 with open(ROOT / "config" / "config.yaml", "r", encoding="utf-8") as f:
     config = yaml.safe_load(f)
@@ -116,20 +120,28 @@ MODES = {"1": "terminal", "2": "web", "3": "headless"}
 mode = MODES[choice]
 
 svc = ROOT / "scripts" / "service.py"
-pythonw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
-py = str(pythonw) if pythonw.exists() else sys.executable
-env = {**os.environ, "OLLAMA_MODELS": str(ROOT / "ia_system" / "models")}
+py = python_runtime.pythonw_exe()
+env = python_runtime.child_env()
 
 startup_kw = {}
-if mode != "terminal":
-    startup_kw = {"creationflags": 0x08000000}
+if os.name == "nt":
+    if mode != "terminal":
+        startup_kw = {"creationflags": 0x08000000}
+        try:
+            si = subprocess.STARTUPINFO()
+            si.dwFlags = subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0
+            startup_kw["startupinfo"] = si
+        except Exception:
+            pass
+else:
+    startup_kw = {"start_new_session": True}
+
+if mode == "terminal" and os.name != "nt":
     try:
-        si = subprocess.STARTUPINFO()
-        si.dwFlags = subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = 0
-        startup_kw["startupinfo"] = si
-    except Exception:
-        pass
+        raise SystemExit(subprocess.call([py, str(svc), mode], env=env))
+    except KeyboardInterrupt:
+        raise SystemExit(0)
 
 subprocess.Popen([py, str(svc), mode], env=env, **startup_kw)
 

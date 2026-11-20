@@ -14,6 +14,7 @@ the user always knows whether background services are active.
 from __future__ import annotations
 
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -31,6 +32,8 @@ import yaml
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("OLLAMA_MODELS", str(ROOT / "ia_system" / "models"))
 
+from core import python_runtime  # noqa: E402
+
 
 def _ensure_pythonw() -> None:
     """Reinicia com pythonw.exe se estiver rodando com python.exe (evita console)."""
@@ -38,14 +41,36 @@ def _ensure_pythonw() -> None:
         return
     if not sys.executable.lower().endswith("python.exe"):
         return
-    pythonw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
-    if not pythonw.exists():
-        pythonw = ROOT / ".venv" / "Scripts" / "python.exe"
-    args = [str(pythonw), str(__file__)] + sys.argv[1:]
-    subprocess.Popen(
-        args, cwd=str(ROOT), creationflags=0x08000000,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-    )
+    pythonw = python_runtime.pythonw_exe()
+    if not pythonw:
+        return
+    try:
+        if Path(pythonw).resolve() == Path(sys.executable).resolve():
+            return
+    except Exception:
+        pass
+
+    log_path = ROOT / "logs" / "service_stderr.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log = open(log_path, "a", encoding="utf-8", buffering=1)
+        subprocess.Popen(
+            [pythonw, str(__file__)] + sys.argv[1:],
+            cwd=str(ROOT),
+            env=python_runtime.child_env(),
+            creationflags=0x08000000,
+            stdout=log,
+            stderr=log,
+            stdin=subprocess.DEVNULL,
+        )
+        log.close()  # the child keeps its own handle
+    except Exception as exc:
+        try:
+            with open(ROOT / "logs" / "service_error.log", "a", encoding="utf-8") as fh:
+                fh.write(f"Falha ao relancar com pythonw: {exc}\n")
+        except Exception:
+            pass
+        return
     sys.exit(0)
 
 
@@ -121,7 +146,10 @@ def _run_web_mode():
     ready = _wait_http(HOST, PORT, timeout=90.0)
     if ready:
         logs.info(f"Web server ready; opening browser at http://{HOST}:{PORT}")
-        webbrowser.open(f"http://{HOST}:{PORT}")
+        try:
+            webbrowser.open(f"http://{HOST}:{PORT}")
+        except Exception as exc:
+            logs.warn(f"Could not open the browser automatically: {exc}")
     else:
         logs.warn("Web server did not become ready; browser not opened")
     return server
@@ -205,6 +233,19 @@ def main() -> int:
         print("usage: service.py [web|terminal|headless]", file=sys.stderr)
         return 2
 
+    # systemd, docker stop and `kill` send SIGTERM; turn it into a clean
+    # shutdown so the runtime state and the engine are handled properly.
+    def _handle_term(signum, frame):
+        raise KeyboardInterrupt
+
+    for name in ("SIGTERM", "SIGHUP"):
+        signum = getattr(signal, name, None)
+        if signum is not None and hasattr(signal, "signal"):
+            try:
+                signal.signal(signum, _handle_term)
+            except Exception:
+                pass
+
     logs.setup()
     logs.info(f"Service starting in {mode} mode")
     _restore_front_page()
@@ -242,10 +283,11 @@ def main() -> int:
                 logs.error("Web server did not start in time")
                 return 1
             _spawn_indicator()
-            python = ROOT / ".venv" / "Scripts" / "python.exe"
+            python = python_runtime.python_exe()
             client = subprocess.Popen(
-                [str(python), str(ROOT / "scripts" / "terminal_client.py")],
+                [python, str(ROOT / "scripts" / "terminal_client.py")],
                 cwd=str(ROOT),
+                env=python_runtime.child_env(),
                 creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
             )
             client.wait()
@@ -278,4 +320,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception:
+        try:
+            (ROOT / "logs").mkdir(parents=True, exist_ok=True)
+            (ROOT / "logs" / "service_error.log").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
+        except Exception:
+            pass
+        raise

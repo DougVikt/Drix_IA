@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.main import ask, atualizar_aprendizado, ConversationManager, config
 
+ROOT = Path(__file__).resolve().parent.parent
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -32,11 +34,18 @@ class ChatBubble(ctk.CTkFrame):
 
 class App(ctk.CTk):
     def __init__(self):
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Drix.PortableAI")
+            except Exception:
+                pass
         super().__init__()
         self.title("Drix - IA Portatil")
         self.geometry("900x600")
         self.minsize(700, 450)
         self.configure(fg_color=COR_FUNDO)
+        self._aplicar_icone()
 
         self.grid_columnconfigure(0, weight=0, minsize=220)
         self.grid_columnconfigure(1, weight=1)
@@ -84,14 +93,37 @@ class App(ctk.CTk):
 
         self.adicionar_msg("Ola! Sou a Drix, sua IA portatil. Como posso ajudar?", "ai")
 
+    def _aplicar_icone(self):
+        """Use the official logo in the title bar and taskbar."""
+        ico = ROOT / "ia_system" / "icon" / "drix.ico"
+        png = ROOT / "ia_system" / "icon" / "logo_drix2.png"
+        if ico.exists():
+            try:
+                self.iconbitmap(default=str(ico))
+            except Exception:
+                pass
+        try:
+            from PIL import Image, ImageTk
+            image = Image.open(png).convert("RGBA")
+            image.thumbnail((64, 64), Image.LANCZOS)
+            self._icon_photo = ImageTk.PhotoImage(image)
+            self.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
+
     def _criar_sidebar(self):
-        icon_path = Path(__file__).parent.parent / "ia_system" / "icon"
-        if icon_path.is_dir():
-            imgs = icon_path.glob("drix_icon.svg")
-            if imgs:
+        icon_path = ROOT / "ia_system" / "icon"
+        png = icon_path / "logo_drix2.png"
+        if png.exists():
+            try:
                 from PIL import Image
-                img = ctk.CTkImage(Image.open(imgs[0]), size=(40, 40))
-                ctk.CTkLabel(self.sidebar, image=img, text="").pack(pady=(20, 0))
+                image = Image.open(png).convert("RGBA")
+                self._sidebar_logo = ctk.CTkImage(
+                    light_image=image, dark_image=image, size=(40, 40)
+                )
+                ctk.CTkLabel(self.sidebar, image=self._sidebar_logo, text="").pack(pady=(20, 0))
+            except Exception:
+                pass
         ctk.CTkLabel(self.sidebar, text="Drix", font=("Segoe UI", 20, "bold"),
                      text_color=COR_TEXTO).pack(pady=(4, 16))
         ctk.CTkLabel(self.sidebar, text=f"Modo: {config.get('operation', 'mode', default='local').upper()}",

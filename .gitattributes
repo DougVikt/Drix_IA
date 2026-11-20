@@ -1,0 +1,5 @@
+# Keep launchers usable on every platform.
+*.sh   text eol=lf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+Makefile text eol=lf

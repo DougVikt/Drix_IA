@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core import logs, runtime
+from core import python_runtime
 
 
 def _ensure_pythonw() -> None:
@@ -34,14 +35,36 @@ def _ensure_pythonw() -> None:
         return
     if not sys.executable.lower().endswith("python.exe"):
         return
-    pythonw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
-    if not pythonw.exists():
-        pythonw = ROOT / ".venv" / "Scripts" / "python.exe"
-    args = [str(pythonw), str(__file__)] + sys.argv[1:]
-    subprocess.Popen(
-        args, cwd=str(ROOT), creationflags=0x08000000,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-    )
+    pythonw = python_runtime.pythonw_exe()
+    if not pythonw:
+        return
+    try:
+        if Path(pythonw).resolve() == Path(sys.executable).resolve():
+            return
+    except Exception:
+        pass
+
+    log_path = ROOT / "logs" / "indicator_stderr.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log = open(log_path, "a", encoding="utf-8", buffering=1)
+        subprocess.Popen(
+            [pythonw, str(__file__)] + sys.argv[1:],
+            cwd=str(ROOT),
+            env=python_runtime.child_env(),
+            creationflags=0x08000000,
+            stdout=log,
+            stderr=log,
+            stdin=subprocess.DEVNULL,
+        )
+        log.close()  # the child keeps its own handle
+    except Exception as exc:
+        try:
+            with open(ROOT / "logs" / "indicator_error.log", "a", encoding="utf-8") as fh:
+                fh.write(f"Falha ao relancar com pythonw: {exc}\n")
+        except Exception:
+            pass
+        return
     sys.exit(0)
 
 
@@ -74,7 +97,14 @@ class Indicator(tk.Tk):
                 self.iconphoto(True, self._logo_icon)
             except Exception:
                 pass
+        ico = ROOT / "ia_system" / "icon" / "drix.ico"
+        if ico.exists():
+            try:
+                self.iconbitmap(str(ico))
+            except Exception:
+                pass
 
+        self.ui_font = self._pick_font()
         self._snapshot: dict = {}
         self._busy = False
         self._stopping = False
@@ -93,6 +123,14 @@ class Indicator(tk.Tk):
             return sw - 340, sh - 300
         except Exception:
             return 40, 40
+
+    def _pick_font(self) -> str:
+        """Use a font that exists on the current platform (Tk falls back)."""
+        try:
+            import tkinter.font as tkfont
+            return tkfont.nametofont("TkDefaultFont").actual("family") or "Segoe UI"
+        except Exception:
+            return "Segoe UI"
 
     # ─── UI ──────────────────────────────────────────────────
 
@@ -118,9 +156,9 @@ class Indicator(tk.Tk):
             tk.Label(header, image=self._logo_header, bg=BG).pack(side="left", padx=(0, 7))
 
         tk.Label(header, text="Drix", bg=BG, fg=TEXT,
-                 font=("Segoe UI", 13, "bold")).pack(side="left")
+                 font=(self.ui_font, 13, "bold")).pack(side="left")
         self.overall = tk.Label(header, text="verificando…", bg=BG, fg=MUTED,
-                                font=("Segoe UI", 9))
+                                font=(self.ui_font, 9))
         self.overall.pack(side="right")
 
         card = tk.Frame(self, bg=CARD)
@@ -130,13 +168,13 @@ class Indicator(tk.Tk):
         for key, label in (("engine", "Motor (Ollama)"), ("web", "Web"), ("indicator", "Indicador")):
             row = tk.Frame(card, bg=CARD)
             row.pack(fill="x", padx=10, pady=5)
-            dot = tk.Label(row, text="●", bg=CARD, fg=MUTED, font=("Segoe UI", 12))
+            dot = tk.Label(row, text="●", bg=CARD, fg=MUTED, font=(self.ui_font, 12))
             dot.pack(side="left")
             name = tk.Label(row, text=label, bg=CARD, fg=TEXT,
-                            font=("Segoe UI", 10), anchor="w")
+                            font=(self.ui_font, 10), anchor="w")
             name.pack(side="left", padx=(6, 0))
             detail = tk.Label(row, text="", bg=CARD, fg=MUTED,
-                              font=("Segoe UI", 9))
+                              font=(self.ui_font, 9))
             detail.pack(side="right")
             self.rows[key] = (dot, detail)
 
@@ -152,7 +190,7 @@ class Indicator(tk.Tk):
             parent, text=text, command=command, bg=color, fg=TEXT,
             activebackground="#1f1f38", activeforeground=TEXT,
             relief="flat", bd=0, highlightthickness=0,
-            font=("Segoe UI", 9), padx=8, pady=6, cursor="hand2",
+            font=(self.ui_font, 9), padx=8, pady=6, cursor="hand2",
         )
         btn.grid(row=column // 2, column=column % 2, sticky="ew", padx=3, pady=3)
         parent.grid_columnconfigure(column % 2, weight=1)
@@ -258,7 +296,10 @@ class Indicator(tk.Tk):
         web = self._snapshot.get("web") or {}
         host = web.get("host", "127.0.0.1")
         port = web.get("port", 8000)
-        webbrowser.open(f"http://{host}:{port}")
+        try:
+            webbrowser.open(f"http://{host}:{port}")
+        except Exception:
+            pass
 
     def _restart_engine(self):
         def _work():

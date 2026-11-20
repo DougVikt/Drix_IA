@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import core.hardware as hardware
+import core.platform_paths as platform_paths
 import yaml
 
 with open(ROOT / "config" / "config.yaml") as f:
@@ -36,15 +37,17 @@ print(f"  Installed: {len(hw['installed_models'])} model(s)")
 for m in hw["installed_models"]:
     print(f"    - {m}")
 
-ollama_fallback = ROOT / "ia_system" / "engine" / "ollama.exe"
-ollama_bin = shutil.which("ollama") or (ollama_fallback if ollama_fallback.exists() else None)
+ollama_bin = platform_paths.ollama_binary()
 print(f"\n[Ollama]")
 print(f"  Binary:    {ollama_bin or 'NOT FOUND'}")
 if ollama_bin:
     try:
-        r = subprocess.run(["tasklist", "/fi", "imagename eq ollama.exe"],
-                          capture_output=True, text=True, timeout=5)
-        running = "ollama.exe" in r.stdout
+        import psutil
+        names = {"ollama", "ollama.exe", "llama-server", "llama-server.exe"}
+        running = any(
+            (proc.info.get("name") or "").lower() in names
+            for proc in psutil.process_iter(["name"])
+        )
         print(f"  Running:   {'Yes' if running else 'No'}")
     except Exception:
         print(f"  Running:   ?")

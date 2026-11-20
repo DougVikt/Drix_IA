@@ -35,6 +35,7 @@ import core.logs as logs
 logs.setup()
 
 import core.hardware as hardware
+import core.platform_paths as platform_paths
 import core.providers as providers
 try:
     import core.memory as memory
@@ -592,7 +593,7 @@ class SecurityBridge:
             return False
 
     def can_access(self, target_path: str, mode: str = "read") -> bool:
-        abs_target = os.path.abspath(os.path.expandvars(target_path))
+        abs_target = os.path.abspath(str(platform_paths.expand_path(target_path)))
         hd_root = os.path.abspath(str(HD_ROOT))
         if self._is_under(abs_target, hd_root):
             return True
@@ -601,7 +602,7 @@ class SecurityBridge:
             return False
         allowed = self.cfg.get("security", {}).get("allowed_folders", [])
         for path in allowed:
-            expanded = os.path.abspath(os.path.expandvars(path))
+            expanded = os.path.abspath(str(platform_paths.expand_path(path)))
             if self._is_under(abs_target, expanded):
                 return True
         return False
@@ -642,20 +643,15 @@ class SkillManager:
 
 def _check_dependencies():
     import subprocess as _sp
-    _si = None
-    try:
-        _si = _sp.STARTUPINFO(); _si.dwFlags = _sp.STARTF_USESHOWWINDOW; _si.wShowWindow = 0
-    except Exception:
-        pass
-    _cw = _sp.CREATE_NO_WINDOW if hasattr(_sp, "CREATE_NO_WINDOW") else 0
+    _run_kwargs = platform_paths.hidden_process_kwargs()
     warnings = []
-    ollama_bin = shutil.which("ollama") or str(HD_ROOT / "ia_system" / "engine" / "ollama.exe")
-    if not os.path.exists(ollama_bin):
+    ollama_bin = platform_paths.ollama_binary()
+    if not ollama_bin or not os.path.exists(ollama_bin):
         warnings.append("Ollama binary not found")
     else:
         try:
             r = _sp.run([ollama_bin, "list"], capture_output=True, text=True, timeout=10,
-                       startupinfo=_si, creationflags=_cw)
+                       **_run_kwargs)
             if r.returncode != 0:
                 warnings.append("Ollama not responding")
             elif "nomic-embed-text" not in r.stdout:
@@ -1008,6 +1004,14 @@ async def _build_messages(query: str, conv_mgr=None) -> list[dict]:
         dynamic.append(web_context[:2400])
     if knowledge_context:
         dynamic.append(knowledge_context)
+    try:
+        from .maps import store as maps_store
+        if maps_store.settings().get("enabled", True):
+            maps_info = maps_store.info()
+            if maps_info.get("count"):
+                dynamic.append(maps_store.context_text(6))
+    except Exception as exc:
+        logs.warn(f"Maps context skipped: {exc}")
     if context:
         dynamic.append(f"{lang.get('prompt_context_label')}\n{context[:900]}")
 
