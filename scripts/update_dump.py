@@ -3,9 +3,10 @@
 
 Usage::
 
-    .venv/Scripts/python.exe scripts/update_dump.py [reason]
+    .venv/Scripts/python.exe scripts/update_dump.py [reason]   # Windows
+    .venv/bin/python scripts/update_dump.py [reason]           # Linux
 
-Writes to ``F:/DADOS_DEV/drix_complete_dump.json``.  The output file itself is
+Writes to ``DADOS_DEV/drix_complete_dump.json``.  The output file itself is
 never included, so the dump can be regenerated safely in place.
 """
 import datetime
@@ -14,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT.parent / "DADOS_DEV" / "drix_complete_dump.json"
+OUT = ROOT / "DADOS_DEV" / "drix_complete_dump.json"
 
 SKIP_DIRS = {
     ".venv", ".git", "__pycache__", ".cache", ".chainlit",
@@ -24,12 +25,15 @@ SKIP_DIRS = {
     # Pastas que não fazem parte do código da Drix.
     "$RECYCLE.BIN", "System Volume Information",
     "project-nomad-main", "omniget-main",
+    # Bibliotecas e fontes vendorizadas: ficam no disco para uso offline,
+    # mas não entram no dump de código (evita duplicar ~1 MB por arquivo).
+    "vendor", "map-assets", "tmp",
 }
 EXTS = {
     ".py", ".yaml", ".yml", ".toml", ".json", ".md", ".txt", ".cfg",
-    ".html", ".css", ".js", ".bat",
+    ".html", ".css", ".js", ".bat", ".sh",
 }
-SPECIAL_NAMES = {"Makefile", "start.bat"}
+SPECIAL_NAMES = {"Makefile", "start.bat", "start.sh"}
 
 
 def _skipped(path: Path) -> bool:
