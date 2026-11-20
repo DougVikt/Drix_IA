@@ -53,6 +53,7 @@ and `core/python_runtime.py`.
 | Memory | SQLite + Chroma, background consolidation, context compaction |
 | Web | Search/fetch with network policy and SSRF blocking, content treated as untrusted |
 | Downloads | yt-dlp + portable ffmpeg: video/audio by URL, queue, progress and cancel |
+| Maps | Offline maps (PMTiles + MapLibre): presets, download/extract/import, viewer |
 | Knowledge | Local RAG in SQLite: upload PDF/DOCX/TXT/…, semantic search, sources cited in chat |
 | Tools | Shell, files, memory, snapshots, MCP, skills (audio, image, video, vision) |
 
@@ -122,6 +123,7 @@ Detailed guides live in [`docs/`](./docs), kept separate so the README stays sho
 |-----------|----------------------|
 | [`docs/CREATION.md`](./docs/CREATION.md) | Understand how Drix is assembled, recreate the environment from scratch, folder structure and builds |
 | [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | Configure everything: `config.yaml`, environment variables, API keys, permissions, network |
+| [`docs/MAPS.md`](./docs/MAPS.md) | Offline maps: presets, download/import, viewer and configuration |
 | [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) | See what changed in this version |
 
 ## Project structure
