@@ -123,7 +123,6 @@ Detailed guides live in [`docs/`](./docs), kept separate so the README stays sho
 | [`docs/CREATION.md`](./docs/CREATION.md) | Understand how Drix is assembled, recreate the environment from scratch, folder structure and builds |
 | [`docs/CONFIGURATION.md`](./docs/CONFIGURATION.md) | Configure everything: `config.yaml`, environment variables, API keys, permissions, network |
 | [`RELEASE_NOTES.md`](./RELEASE_NOTES.md) | See what changed in this version |
-| [`DADOS_DEV/`](./DADOS_DEV/) | Development documentation (history, full reference, status) — **local, not versioned** |
 
 ## Project structure
 
