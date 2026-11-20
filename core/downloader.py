@@ -22,6 +22,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import logs, tools
+from . import platform_paths
 
 try:  # yt-dlp is optional: Drix keeps working without it.
     import yt_dlp
@@ -61,11 +62,7 @@ def _setting(name: str, default=None):
 
 
 def _expand(path: str) -> Path:
-    text = os.path.expandvars(os.path.expanduser(str(path or "").strip()))
-    target = Path(text)
-    if not target.is_absolute():
-        target = _ROOT / target
-    return target
+    return platform_paths.expand_path(path, base=_ROOT)
 
 
 def default_dir() -> Path:
@@ -79,12 +76,9 @@ def ffmpeg_path() -> str:
         candidate = _expand(configured)
         if candidate.exists():
             return str(candidate)
-    bundled = _ROOT / "ia_system" / "ffmpeg" / "ffmpeg.exe"
-    if bundled.exists():
-        return str(bundled)
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
+    bundled = platform_paths.ffmpeg_binary()
+    if bundled:
+        return bundled
     try:
         # imageio-ffmpeg ships a portable binary inside the venv, so the
         # downloader gets merging/MP3 support without touching the PATH.
