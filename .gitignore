@@ -249,3 +249,6 @@ DADOS_DEV/
 drix_complete_dump.json
 # Runtime UI swap backup
 ui/front/index.html.bak
+
+# Temporary test artifacts
+tmp/
