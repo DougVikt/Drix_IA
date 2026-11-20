@@ -17,8 +17,10 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.auth import AuthMiddleware, COOKIE_NAME
+from api.maps import router as maps_router
 from api.routes import router
 from core import runtime, secrets as drix_secrets
+from core.maps import downloads as map_downloads
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "config.yaml"
@@ -93,6 +95,10 @@ async def lifespan(app: FastAPI):
     finally:
         runtime.unregister("web")
         runtime.stop_heartbeat()
+        try:
+            map_downloads.shutdown()
+        except Exception:
+            pass
         if WEB_CFG.get("stop_engine_on_exit", False):
             runtime.stop_engine()
 
@@ -101,6 +107,7 @@ app = FastAPI(title="Drix", lifespan=lifespan)
 if api_key:
     app.middleware("http")(AuthMiddleware(api_key=api_key, rate_limit=60))
 app.include_router(router, prefix="/api")
+app.include_router(maps_router, prefix="/api")
 
 icon_dir = ROOT / "ia_system" / "icon"
 if icon_dir.is_dir():
@@ -114,6 +121,14 @@ FRONT_DIR = Path(__file__).resolve().parent / "front"
 HTML_PATH = FRONT_DIR / "index.html"
 CSS_PATH = FRONT_DIR / "style.css"
 JS_PATH = FRONT_DIR / "script.js"
+
+vendor_dir = FRONT_DIR / "vendor"
+if vendor_dir.is_dir():
+    app.mount("/vendor", StaticFiles(directory=str(vendor_dir)), name="vendor")
+
+map_assets_dir = FRONT_DIR / "map-assets"
+if map_assets_dir.is_dir():
+    app.mount("/map-assets", StaticFiles(directory=str(map_assets_dir)), name="map-assets")
 
 _NO_STORE = {"Cache-Control": "no-store"}
 

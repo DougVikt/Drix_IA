@@ -12,6 +12,10 @@
   let attachChipName = $('#attachChipName'), attachChipRemove = $('#attachChipRemove');
   let settingsBtn = $('#settingsBtn'), settingsModal = $('#settingsModal'), settingsClose = $('#settingsClose');
   let knowledgeBtn = $('#knowledgeBtn'), knowledgeModal = $('#knowledgeModal'), knowledgeClose = $('#knowledgeClose');
+  let mapsBtn = $('#mapsBtn'), mapsModal = $('#mapsModal'), mapsClose = $('#mapsClose');
+  let mapsLastFocus = null, mapsTimer = null, mapsViewer = null, mapsLibPromise = null;
+  let mapsUploadJob = null;
+  let mapsState = { maps: [], presets: [], jobs: [], uploads: [], info: {}, enabled: true, loaded: false, tab: 'library' };
   let typewriterSwitch = $('#typewriterSwitch');
   let ESC = function (s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); };
 
@@ -66,6 +70,7 @@
   let lastFocus = null;
   function openModal() {
     lastFocus = document.activeElement;
+    if (!mapsModal.hidden) closeMapsModal();
     settingsModal.hidden = false;
     settingsClose.focus();
     loadSettingsPanel();
@@ -125,6 +130,7 @@
     if (currentTab === 'tools') loadToolsPanel();
     if (currentTab === 'downloads') loadDownloadsPanel();
     if (currentTab === 'knowledge') loadKnowledgePanel(true);
+    if (currentTab === 'maps') { loadPermissionsPanel(); loadMapsSettingsInfo(); }
     if (currentTab === 'system') { loadSystemStatus(); loadLogs(); }
     if (currentTab === 'model') loadModelsPanel();
   }
@@ -1017,6 +1023,7 @@
 
   function openKnowledgeModal() {
     knowledgeLastFocus = document.activeElement;
+    if (!mapsModal.hidden) closeMapsModal();
     if (!settingsModal.hidden) {
       settingsModal.hidden = true;
       stopDownloadPolling();
@@ -1196,6 +1203,876 @@
     loadKnowledgePanel(true).then(function () { setSettingsStatus('Estado da base atualizado.', 'ok'); });
   });
 
+  /* ─── mapas offline ─────────────────────────────────────────── */
+
+  function mapsFmtBytes(value) {
+    let n = Number(value) || 0;
+    let units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let index = 0;
+    while (n >= 1024 && index < units.length - 1) { n /= 1024; index += 1; }
+    return (index === 0 ? Math.round(n) : n.toFixed(1)) + ' ' + units[index];
+  }
+
+  function mapsNorm(text) {
+    return String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, ' ').trim().toLowerCase();
+  }
+
+  function mapsStatus(text, kind) {
+    let el = $('#mapsFooter');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'settings-status' + (kind ? ' ' + kind : '');
+  }
+
+  function mapsDownloadStatus(text, kind) {
+    let el = $('#mapsDownloadStatus');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'maps-status' + (kind ? ' ' + kind : '');
+  }
+
+  function setMapsUploadStatus(text, kind) {
+    let el = $('#mapsUploadStatus');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'maps-status' + (kind ? ' ' + kind : '');
+  }
+
+  function activateMapsTab(name) {
+    mapsState.tab = name || 'library';
+    document.querySelectorAll('#mapsTabs .maps-tab').forEach(function (tab) {
+      let on = tab.dataset.mapsTab === mapsState.tab;
+      tab.classList.toggle('active', on);
+      tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-maps-section]').forEach(function (section) {
+      section.hidden = section.dataset.mapsSection !== mapsState.tab;
+    });
+  }
+
+  function mapsHasActive() {
+    return mapsState.jobs.some(function (job) { return !!job.active; });
+  }
+
+  function stopMapsPolling() {
+    if (mapsTimer) { clearInterval(mapsTimer); mapsTimer = null; }
+  }
+
+  function scheduleMapsPolling() {
+    stopMapsPolling();
+    if (mapsModal.hidden || !mapsHasActive()) return;
+    mapsTimer = setInterval(function () { loadMapsPanel(true); }, 1800);
+  }
+
+  function renderMapsStats() {
+    let box = $('#mapsStats');
+    if (!box) return;
+    let info = mapsState.info || {};
+    let active = mapsState.jobs.filter(function (job) { return !!job.active; }).length;
+    box.innerHTML = '';
+    let entries = [
+      ['Mapas', String(info.count || 0)],
+      ['Tamanho', info.size_label || '0 B'],
+      ['Espaço livre', info.free_label || '—'],
+    ];
+    if (active) entries.push(['Em andamento', String(active)]);
+    entries.forEach(function (entry) {
+      let span = document.createElement('span');
+      span.className = 'maps-stat';
+      let strong = document.createElement('strong');
+      strong.textContent = entry[1];
+      span.appendChild(strong);
+      span.appendChild(document.createTextNode(' ' + entry[0]));
+      box.appendChild(span);
+    });
+  }
+
+  function mapItemCard(item) {
+    let card = document.createElement('article');
+    card.className = 'map-item';
+    card.dataset.mapId = item.id;
+
+    let main = document.createElement('div');
+    main.className = 'map-item-main';
+    let title = document.createElement('div');
+    title.className = 'map-item-title';
+    let name = document.createElement('strong');
+    name.textContent = item.name || 'Mapa';
+    title.appendChild(name);
+    let zoom = document.createElement('span');
+    zoom.className = 'map-zoom';
+    zoom.textContent = item.zoom_label || '—';
+    title.appendChild(zoom);
+    main.appendChild(title);
+
+    let meta = document.createElement('p');
+    meta.className = 'map-meta';
+    meta.textContent = (item.size_label || '—') + ' · cobertura ' + (item.bounds_label || '—');
+    main.appendChild(meta);
+
+    if (item.source_url) {
+      let source = document.createElement('p');
+      source.className = 'map-source';
+      source.textContent = item.source_url;
+      source.title = item.source_url;
+      main.appendChild(source);
+    }
+    card.appendChild(main);
+
+    let actions = document.createElement('div');
+    actions.className = 'map-actions';
+    let open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'btn settings-save';
+    open.textContent = 'Abrir';
+    open.addEventListener('click', function () { openMapsViewer(item.id); });
+    actions.appendChild(open);
+    let del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn btn-secondary map-delete';
+    del.textContent = 'Excluir';
+    del.addEventListener('click', function () { deleteMap(item.id); });
+    actions.appendChild(del);
+    card.appendChild(actions);
+    return card;
+  }
+
+  function renderMapsList() {
+    let box = $('#mapsList');
+    if (!box) return;
+    box.innerHTML = '';
+    let filterInput = $('#mapsFilter');
+    let filter = mapsNorm(filterInput ? filterInput.value : '');
+    let items = mapsState.maps.filter(function (item) {
+      if (!filter) return true;
+      return mapsNorm(item.name + ' ' + item.id + ' ' + (item.source_url || '')).indexOf(filter) !== -1;
+    });
+    if (!items.length) {
+      let note = document.createElement('p');
+      note.className = 'settings-note';
+      note.textContent = mapsState.maps.length
+        ? 'Nenhum mapa corresponde ao filtro.'
+        : 'Nenhum mapa instalado. Use as abas Baixar ou Importar para adicionar.';
+      box.appendChild(note);
+      return;
+    }
+    items.forEach(function (item) { box.appendChild(mapItemCard(item)); });
+  }
+
+  function renderMapsPresets() {
+    let box = $('#mapsPresets');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!mapsState.presets.length) {
+      box.innerHTML = '<p class="settings-note">Presets indisponíveis.</p>';
+      return;
+    }
+    mapsState.presets.forEach(function (preset) {
+      let card = document.createElement('article');
+      card.className = 'maps-preset';
+      card.dataset.preset = preset.key;
+
+      let head = document.createElement('div');
+      head.className = 'maps-preset-head';
+      let name = document.createElement('strong');
+      name.textContent = preset.name || preset.key;
+      head.appendChild(name);
+      if (preset.maxzoom != null) {
+        let zoom = document.createElement('span');
+        zoom.className = 'map-zoom';
+        zoom.textContent = 'z0–' + preset.maxzoom;
+        head.appendChild(zoom);
+      }
+      card.appendChild(head);
+
+      let note = document.createElement('p');
+      note.className = 'maps-preset-note';
+      note.textContent = preset.note || 'Recorte pronto para uso offline.';
+      card.appendChild(note);
+
+      let meta = document.createElement('p');
+      meta.className = 'maps-preset-meta';
+      let estimate = document.createElement('span');
+      estimate.className = 'maps-estimate';
+      estimate.textContent = preset.estimate ? '≈ ' + preset.estimate : 'tamanho sob consulta';
+      meta.appendChild(estimate);
+      card.appendChild(meta);
+
+      let actions = document.createElement('div');
+      actions.className = 'maps-preset-actions';
+      let measure = document.createElement('button');
+      measure.type = 'button';
+      measure.className = 'btn btn-secondary';
+      measure.textContent = 'Estimar';
+      measure.addEventListener('click', function () { estimatePreset(preset, estimate, measure); });
+      actions.appendChild(measure);
+      let download = document.createElement('button');
+      download.type = 'button';
+      download.className = 'btn settings-save';
+      download.textContent = 'Baixar';
+      download.addEventListener('click', function () { startPresetDownload(preset); });
+      actions.appendChild(download);
+      card.appendChild(actions);
+      box.appendChild(card);
+    });
+  }
+
+  function renderMapsJobs() {
+    let box = $('#mapsJobs');
+    if (!box) return;
+    let jobs = mapsState.jobs.filter(function (job) {
+      return job.active || job.status === 'error' || job.status === 'interrupted' ||
+        job.status === 'cancelled';
+    });
+    box.innerHTML = '';
+    box.hidden = !jobs.length;
+    if (!jobs.length) return;
+    let head = document.createElement('p');
+    head.className = 'settings-group';
+    head.textContent = 'Em andamento';
+    box.appendChild(head);
+
+    jobs.forEach(function (job) {
+      let row = document.createElement('div');
+      row.className = 'maps-job';
+      let top = document.createElement('div');
+      top.className = 'maps-job-top';
+      let title = document.createElement('strong');
+      title.textContent = (job.kind === 'extract' ? 'Recorte · ' : 'Download · ') + (job.name || job.id);
+      top.appendChild(title);
+      let state = document.createElement('span');
+      state.className = 'maps-job-state';
+      state.textContent = job.active
+        ? (job.status === 'verifying' || job.status === 'saving' ? job.status : (job.progress || 0) + '%')
+        : job.status;
+      top.appendChild(state);
+      row.appendChild(top);
+
+      if (job.active) {
+        let bar = document.createElement('div');
+        bar.className = 'maps-progress';
+        let fill = document.createElement('span');
+        fill.style.width = Math.max(0, Math.min(100, Number(job.progress) || 0)) + '%';
+        bar.appendChild(fill);
+        row.appendChild(bar);
+        let details = document.createElement('p');
+        details.className = 'maps-job-meta';
+        let parts = [];
+        if (job.bytes_total) parts.push(mapsFmtBytes(job.bytes_done) + ' de ' + mapsFmtBytes(job.bytes_total));
+        if (job.speed_label) parts.push(job.speed_label);
+        if (job.eta_label) parts.push('resta ' + job.eta_label);
+        details.textContent = parts.join(' · ') || 'preparando…';
+        row.appendChild(details);
+      } else if (job.error) {
+        let err = document.createElement('p');
+        err.className = 'maps-job-meta maps-error';
+        err.textContent = job.error;
+        row.appendChild(err);
+      }
+
+      let actions = document.createElement('div');
+      actions.className = 'maps-job-actions';
+      if (job.active) {
+        let cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn btn-secondary';
+        cancel.textContent = 'Cancelar';
+        cancel.addEventListener('click', function () { cancelMapJob(job.id); });
+        actions.appendChild(cancel);
+      } else if (job.kind === 'download' &&
+        (job.status === 'interrupted' || job.status === 'cancelled' || job.status === 'error')) {
+        let resume = document.createElement('button');
+        resume.type = 'button';
+        resume.className = 'btn btn-secondary';
+        resume.textContent = 'Retomar';
+        resume.addEventListener('click', function () { resumeMapJob(job.id); });
+        actions.appendChild(resume);
+      }
+      if (actions.childNodes.length) row.appendChild(actions);
+      box.appendChild(row);
+    });
+  }
+
+  function renderMapsUploads() {
+    let box = $('#mapsUploads');
+    if (!box) return;
+    let uploads = mapsState.uploads || [];
+    box.innerHTML = '';
+    box.hidden = !uploads.length;
+    if (!uploads.length) return;
+    let head = document.createElement('p');
+    head.className = 'settings-group';
+    head.textContent = 'Importações anteriores';
+    box.appendChild(head);
+    uploads.forEach(function (upload) {
+      let row = document.createElement('div');
+      row.className = 'maps-upload-row';
+      let text = document.createElement('span');
+      let percent = upload.size ? Math.round((upload.offset || 0) * 100 / upload.size) : 0;
+      text.textContent = (upload.filename || upload.name || 'arquivo') + ' · ' + percent + '%';
+      row.appendChild(text);
+      let discard = document.createElement('button');
+      discard.type = 'button';
+      discard.className = 'btn btn-secondary';
+      discard.textContent = 'Descartar';
+      discard.addEventListener('click', function () { discardUpload(upload.upload_id); });
+      row.appendChild(discard);
+      box.appendChild(row);
+    });
+  }
+
+  function loadMapsPanel(silent) {
+    if (!silent) mapsStatus('Carregando mapas…');
+    return api('/maps')
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        mapsState.maps = data.maps || [];
+        mapsState.presets = data.presets || [];
+        mapsState.jobs = data.jobs || [];
+        mapsState.uploads = data.uploads || [];
+        mapsState.info = data.info || {};
+        mapsState.enabled = data.enabled !== false;
+        mapsState.loaded = true;
+        renderMapsStats();
+        renderMapsList();
+        renderMapsPresets();
+        renderMapsJobs();
+        renderMapsUploads();
+        scheduleMapsPolling();
+        if (!silent) mapsStatus('');
+      })
+      .catch(function (e) {
+        if (!silent) mapsStatus(e && e.message ? e.message : 'Falha ao carregar mapas.', 'err');
+      });
+  }
+
+  function openMapsModal(view) {
+    mapsLastFocus = document.activeElement;
+    if (knowledgeModal && !knowledgeModal.hidden) {
+      knowledgeModal.hidden = true;
+      stopKnowledgePolling();
+    }
+    if (!settingsModal.hidden) {
+      settingsModal.hidden = true;
+      stopDownloadPolling();
+    }
+    mapsModal.hidden = false;
+    activateMapsTab(view === 'download' || view === 'import' ? view : 'library');
+    mapsClose.focus();
+    loadMapsPanel();
+  }
+
+  function closeMapsModal() {
+    if (mapsModal.hidden) return;
+    closeMapsViewer();
+    mapsModal.hidden = true;
+    stopMapsPolling();
+    if (mapsLastFocus && mapsLastFocus.focus) mapsLastFocus.focus();
+  }
+
+  function highlightPreset(key) {
+    setTimeout(function () {
+      let card = document.querySelector('.maps-preset[data-preset="' + key + '"]');
+      if (!card) return;
+      card.classList.add('maps-preset-focus');
+      card.scrollIntoView({ block: 'center' });
+    }, 260);
+  }
+
+  function startPresetDownload(preset) {
+    let label = preset.name || preset.key;
+    let size = preset.estimate ? ' (~' + preset.estimate + ')' : '';
+    if (!confirm('Baixar o preset "' + label + '"' + size + '? A extração usa a internet e pode levar alguns minutos.')) return;
+    mapsDownloadStatus('Iniciando ' + label + '…');
+    api('/maps/extract', { method: 'POST', body: JSON.stringify({ preset: preset.key }) })
+      .then(function (r) { return readResponse(r); })
+      .then(function (job) {
+        mapsDownloadStatus('Job ' + job.id + ' iniciado.', 'ok');
+        activateMapsTab('library');
+        loadMapsPanel();
+      })
+      .catch(function (e) { mapsDownloadStatus(e && e.message ? e.message : 'Falha ao iniciar.', 'err'); });
+  }
+
+  function estimatePreset(preset, labelEl, button) {
+    if (!confirm('Medir o tamanho real de "' + (preset.name || preset.key) +
+      '"? A medição baixa os dados necessários e pode consumir centenas de MB.')) return;
+    let previous = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Medindo…';
+    labelEl.textContent = 'medindo…';
+    api('/maps/extract/estimate', { method: 'POST', body: JSON.stringify({ preset: preset.key }) })
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        labelEl.textContent = '≈ ' + (data.size_label || '—');
+        labelEl.title = data.transferred_label ? 'transferência estimada: ' + data.transferred_label : '';
+      })
+      .catch(function (e) {
+        labelEl.textContent = 'falha ao medir';
+        labelEl.title = e && e.message ? e.message : '';
+      })
+      .then(function () {
+        button.disabled = false;
+        button.textContent = previous;
+      });
+  }
+
+  function startUrlDownload() {
+    let url = $('#mapsUrl').value.trim();
+    let name = $('#mapsUrlName').value.trim();
+    if (!url) { $('#mapsUrl').focus(); return; }
+    if (!confirm('Baixar o mapa de "' + url + '"? O arquivo será salvo em data/maps.')) return;
+    mapsDownloadStatus('Iniciando download…');
+    api('/maps/downloads', { method: 'POST', body: JSON.stringify({ url: url, name: name }) })
+      .then(function (r) { return readResponse(r); })
+      .then(function (job) {
+        $('#mapsUrl').value = '';
+        $('#mapsUrlName').value = '';
+        mapsDownloadStatus('Download iniciado: ' + job.name, 'ok');
+        activateMapsTab('library');
+        loadMapsPanel();
+      })
+      .catch(function (e) { mapsDownloadStatus(e && e.message ? e.message : 'Falha ao baixar.', 'err'); });
+  }
+
+  function cancelMapJob(id) {
+    if (!confirm('Cancelar este download? O arquivo parcial fica salvo para retomar depois.')) return;
+    api('/maps/jobs/' + encodeURIComponent(id) + '/cancel', { method: 'POST', body: '{}' })
+      .then(function (r) { return readResponse(r); })
+      .then(function () { loadMapsPanel(true); })
+      .catch(function (e) { mapsStatus(e && e.message ? e.message : 'Falha ao cancelar.', 'err'); });
+  }
+
+  function resumeMapJob(id) {
+    api('/maps/jobs/' + encodeURIComponent(id) + '/resume', { method: 'POST', body: '{}' })
+      .then(function (r) { return readResponse(r); })
+      .then(function () { loadMapsPanel(); })
+      .catch(function (e) { mapsStatus(e && e.message ? e.message : 'Falha ao retomar.', 'err'); });
+  }
+
+  function deleteMap(id) {
+    let item = mapsState.maps.filter(function (map) { return map.id === id; })[0];
+    let label = item ? item.name : id;
+    if (!confirm('Apagar o mapa "' + label + '"? O arquivo será removido do armazenamento da Drix.')) return;
+    api('/maps/' + encodeURIComponent(id), { method: 'DELETE' })
+      .then(function (r) { return readResponse(r); })
+      .then(function () {
+        if (mapsState.openMapId === id) closeMapsViewer();
+        mapsStatus('Mapa apagado.', 'ok');
+        loadMapsPanel(true);
+      })
+      .catch(function (e) { mapsStatus(e && e.message ? e.message : 'Falha ao apagar.', 'err'); });
+  }
+
+  function loadMapsScript(src) {
+    return new Promise(function (resolve, reject) {
+      let existing = document.querySelector('script[data-drix-src="' + src + '"]');
+      if (existing) {
+        if (existing.dataset.loaded === '1') { resolve(); return; }
+        existing.addEventListener('load', function () { resolve(); });
+        existing.addEventListener('error', function () { reject(new Error('falha ao carregar ' + src)); });
+        return;
+      }
+      let script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.dataset.drixSrc = src;
+      script.addEventListener('load', function () { script.dataset.loaded = '1'; resolve(); });
+      script.addEventListener('error', function () { reject(new Error('falha ao carregar ' + src)); });
+      document.head.appendChild(script);
+    });
+  }
+
+  function loadMapsCss(href) {
+    return new Promise(function (resolve) {
+      if (document.querySelector('link[data-drix-src="' + href + '"]')) { resolve(); return; }
+      let link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = href;
+      link.dataset.drixSrc = href;
+      link.addEventListener('load', function () { resolve(); });
+      link.addEventListener('error', function () { resolve(); });
+      document.head.appendChild(link);
+    });
+  }
+
+  function ensureMapLibre() {
+    if (window.maplibregl && window.pmtiles) return Promise.resolve();
+    if (mapsLibPromise) return mapsLibPromise;
+    mapsLibPromise = loadMapsCss('/vendor/maplibre/maplibre-gl.css')
+      .then(function () { return loadMapsScript('/vendor/maplibre/maplibre-gl.js'); })
+      .then(function () { return loadMapsScript('/vendor/pmtiles/pmtiles.js'); })
+      .then(function () {
+        if (!window.__drixPmtiles) {
+          let protocol = new window.pmtiles.Protocol();
+          window.maplibregl.addProtocol('pmtiles', protocol.tile);
+          window.__drixPmtiles = protocol;
+        }
+      })
+      .catch(function (error) {
+        mapsLibPromise = null;
+        throw error;
+      });
+    return mapsLibPromise;
+  }
+
+  function closeMapsViewer() {
+    if (mapsViewer) {
+      try { mapsViewer.remove(); } catch (e) { }
+      mapsViewer = null;
+    }
+    let viewer = $('#mapsViewer');
+    if (viewer) viewer.hidden = true;
+    mapsState.openMapId = '';
+  }
+
+  function openMapsViewer(mapId, retried) {
+    let item = mapsState.maps.filter(function (map) { return map.id === mapId; })[0];
+    if (!item) {
+      if (retried) { mapsStatus('Mapa não encontrado.', 'err'); return; }
+      loadMapsPanel(true).then(function () { openMapsViewer(mapId, true); });
+      return;
+    }
+    mapsState.openMapId = mapId;
+    let viewer = $('#mapsViewer');
+    viewer.hidden = false;
+    $('#mapsViewerTitle').textContent = item.name || 'Mapa';
+    let meta = [];
+    if (item.zoom_label) meta.push(item.zoom_label);
+    if (item.size_label) meta.push(item.size_label);
+    $('#mapsViewerMeta').textContent = meta.join(' · ');
+    $('#mapsViewerStatus').textContent = 'Carregando mapa…';
+
+    ensureMapLibre().then(function () {
+      closeMapsViewer();
+      $('#mapsViewer').hidden = false;
+      let theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+      let center = Array.isArray(item.center) ? item.center : [];
+      let lon = Number(center[0]);
+      let lat = Number(center[1]);
+      if (!isFinite(lon) || !isFinite(lat)) { lon = 0; lat = 0; }
+      let zoom = Number(item.center_zoom);
+      if (!isFinite(zoom) || zoom <= 0) zoom = 2;
+      mapsViewer = new window.maplibregl.Map({
+        container: 'mapsCanvas',
+        style: '/api/maps/' + encodeURIComponent(mapId) + '/style.json?theme=' + theme,
+        center: [lon, lat],
+        zoom: zoom,
+        maxZoom: 18,
+        attributionControl: true,
+      });
+      mapsViewer.addControl(new window.maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+      mapsViewer.on('load', function () {
+        $('#mapsViewerStatus').textContent = '';
+        try { mapsViewer.resize(); } catch (e) { }
+      });
+      mapsViewer.on('error', function (event) {
+        let message = event && event.error && event.error.message ? event.error.message : '';
+        if (message && !/404|Failed to fetch|Not Found/i.test(message)) {
+          $('#mapsViewerStatus').textContent = message;
+        }
+      });
+    }).catch(function (error) {
+      $('#mapsViewerStatus').textContent = error && error.message ? error.message : 'Falha ao carregar o visualizador.';
+    });
+  }
+
+  function updateUploadProgress() {
+    let job = mapsUploadJob;
+    if (!job) return;
+    let size = job.file.size || job.session.size || 1;
+    let percent = Math.max(0, Math.min(100, Math.round((job.session.offset || 0) * 100 / size)));
+    $('#mapsUpload').hidden = false;
+    $('#mapsUploadBar').style.width = percent + '%';
+    $('#mapsUploadLabel').textContent = percent + '% · ' + mapsFmtBytes(job.session.offset || 0) + ' de ' + mapsFmtBytes(size);
+  }
+
+  function startMapsUpload(file) {
+    if (!file) return;
+    if (!/\.pmtiles$/i.test(file.name)) {
+      setMapsUploadStatus('Escolha um arquivo .pmtiles.', 'err');
+      return;
+    }
+    if (mapsUploadJob) {
+      setMapsUploadStatus('Já existe uma importação em andamento.', 'err');
+      return;
+    }
+    setMapsUploadStatus('Preparando importação…');
+    mapsUploadJob = { file: file, session: null, offset: 0, retries: 0, cancelled: false, done: false };
+    api('/maps/uploads', { method: 'POST', body: JSON.stringify({ filename: file.name, size: file.size }) })
+      .then(function (r) { return readResponse(r); })
+      .then(function (session) {
+        mapsUploadJob.session = session;
+        mapsUploadJob.session.offset = Number(session.offset) || 0;
+        if (mapsUploadJob.session.offset > 0) {
+          setMapsUploadStatus('Retomando de ' + mapsFmtBytes(mapsUploadJob.session.offset) + '…');
+        } else {
+          setMapsUploadStatus('Enviando ' + file.name + '…');
+        }
+        updateUploadProgress();
+        return uploadNextChunk();
+      })
+      .catch(function (error) {
+        setMapsUploadStatus(error && error.message ? error.message : 'Falha na importação.', 'err');
+        mapsUploadJob = null;
+      });
+  }
+
+  function uploadNextChunk() {
+    let job = mapsUploadJob;
+    if (!job || job.cancelled) return Promise.resolve();
+    let offset = Number(job.session.offset) || 0;
+    let size = job.file.size;
+    if (offset >= size) return finishMapsUpload();
+    let chunkSize = Number(job.session.chunk_size) || 4 * 1024 * 1024;
+    let end = Math.min(size, offset + chunkSize);
+    let blob = job.file.slice(offset, end);
+    return api('/maps/uploads/' + encodeURIComponent(job.session.upload_id) + '?offset=' + offset, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: blob
+    }).then(function (res) {
+      if (res.status === 409) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          job.session.offset = Number(data.offset) || 0;
+          return uploadNextChunk();
+        });
+      }
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          throw new Error((data && data.detail) || ('HTTP ' + res.status));
+        });
+      }
+      return res.json().then(function (data) {
+        job.session.offset = Number(data.bytes_done) || end;
+        job.retries = 0;
+        updateUploadProgress();
+        return uploadNextChunk();
+      });
+    }).catch(function (error) {
+      if (job.cancelled) return;
+      if (job.retries < 4) {
+        job.retries += 1;
+        setMapsUploadStatus('Conexão instável; retomando bloco (' + job.retries + '/4)…', 'err');
+        return new Promise(function (resolve) { setTimeout(resolve, 700 * job.retries); })
+          .then(uploadNextChunk);
+      }
+      throw error;
+    });
+  }
+
+  function finishMapsUpload() {
+    let job = mapsUploadJob;
+    if (!job) return;
+    setMapsUploadStatus('Validando SHA-256 e salvando o mapa…');
+    let name = job.file.name.replace(/\.pmtiles$/i, '');
+    api('/maps/uploads/' + encodeURIComponent(job.session.upload_id) + '/finish', {
+      method: 'POST',
+      body: JSON.stringify({ name: name })
+    }).then(function (r) { return readResponse(r); })
+      .then(function (item) {
+        job.done = true;
+        mapsUploadJob = null;
+        setMapsUploadStatus('Mapa "' + (item.name || name) + '" importado.', 'ok');
+        $('#mapsUpload').hidden = true;
+        activateMapsTab('library');
+        loadMapsPanel();
+      })
+      .catch(function (error) {
+        job.retries = 0;
+        setMapsUploadStatus(error && error.message ? error.message : 'Falha ao finalizar a importação.', 'err');
+        mapsUploadJob = null;
+      });
+  }
+
+  function cancelMapsUpload() {
+    let job = mapsUploadJob;
+    if (!job || !job.session) return;
+    job.cancelled = true;
+    if (!confirm('Cancelar a importação? O arquivo parcial fica salvo para retomar depois.')) {
+      job.cancelled = false;
+      return;
+    }
+    api('/maps/uploads/' + encodeURIComponent(job.session.upload_id), { method: 'DELETE' })
+      .catch(function () { })
+      .then(function () {
+        mapsUploadJob = null;
+        $('#mapsUpload').hidden = true;
+        setMapsUploadStatus('Importação cancelada.', 'err');
+        loadMapsPanel(true);
+      });
+  }
+
+  function discardUpload(uploadId) {
+    if (!confirm('Descartar esta importação parcial? O arquivo já enviado será apagado.')) return;
+    api('/maps/uploads/' + encodeURIComponent(uploadId) + '?purge=1', { method: 'DELETE' })
+      .then(function () { loadMapsPanel(true); })
+      .catch(function (e) { mapsStatus(e && e.message ? e.message : 'Falha ao descartar.', 'err'); });
+  }
+
+  function loadPermissionsPanel() {
+    let box = $('#permCacheList');
+    if (box) box.innerHTML = '<p class="settings-note">Carregando decisões…</p>';
+    return api('/permissions/cache')
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        renderPermissionsPanel(data.entries || [], data.path || '');
+      })
+      .catch(function (error) {
+        if (box) box.innerHTML = '<p class="settings-note">Falha ao carregar o cache.</p>';
+        console.warn(error);
+      });
+  }
+
+  function loadMapsSettingsInfo() {
+    let el = $('#mapsSettingsInfo');
+    if (!el) return;
+    api('/maps')
+      .then(function (r) { return readResponse(r); })
+      .then(function (data) {
+        let info = data.info || {};
+        el.textContent = (info.count || 0) + ' mapa(s) · ' + (info.size_label || '0 B') +
+          ' em ' + (info.dir || 'data/maps') + ' · espaço livre ' + (info.free_label || '—');
+      })
+      .catch(function () { el.textContent = 'Falha ao consultar mapas.'; });
+  }
+
+  function renderPermissionsPanel(entries, path) {
+    let box = $('#permCacheList');
+    if (!box) return;
+    box.innerHTML = '';
+    let pathEl = $('#permCachePath');
+    if (pathEl) pathEl.textContent = path ? 'Arquivo: ' + path : '—';
+    if (!entries.length) {
+      let note = document.createElement('p');
+      note.className = 'settings-note';
+      note.textContent = 'Nenhuma decisão lembrada.';
+      box.appendChild(note);
+      return;
+    }
+    entries.forEach(function (entry) {
+      let row = document.createElement('div');
+      row.className = 'settings-tool';
+      let info = document.createElement('div');
+      info.className = 'settings-tool-info';
+      let name = document.createElement('p');
+      name.className = 'settings-tool-name';
+      name.textContent = entry.tool || 'ferramenta';
+      info.appendChild(name);
+      let preview = document.createElement('p');
+      preview.className = 'settings-note';
+      preview.style.margin = '2px 0 0';
+      preview.textContent = entry.preview || '';
+      info.appendChild(preview);
+      row.appendChild(info);
+
+      let badge = document.createElement('span');
+      badge.className = 'settings-badge ' + (entry.decision === 'allow' ? 'ok' : 'deny');
+      badge.textContent = entry.decision === 'allow' ? 'permitir' : 'negar';
+      row.appendChild(badge);
+
+      let remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'btn btn-secondary';
+      remove.textContent = 'Remover';
+      remove.addEventListener('click', function () {
+        api('/permissions/cache/' + encodeURIComponent(entry.key), { method: 'DELETE' })
+          .then(function () { loadPermissionsPanel(); })
+          .catch(function (e) { setSettingsStatus(e && e.message ? e.message : 'Falha ao remover.', 'err'); });
+      });
+      row.appendChild(remove);
+      box.appendChild(row);
+    });
+  }
+
+  function clearPermissionsCache() {
+    if (!confirm('Limpar todas as decisões lembradas? As próximas ações voltam a pedir confirmação.')) return;
+    api('/permissions/cache', { method: 'DELETE' })
+      .then(function () { loadPermissionsPanel(); })
+      .catch(function (e) { setSettingsStatus(e && e.message ? e.message : 'Falha ao limpar.', 'err'); });
+  }
+
+  function handleMapUi(ui) {
+    if (!ui || !ui.action) return;
+    if (ui.action === 'open_panel') {
+      openMapsModal(ui.view || 'library');
+      if (ui.preset) highlightPreset(ui.preset);
+      if (ui.query) {
+        let filter = $('#mapsFilter');
+        if (filter) { filter.value = ui.query; renderMapsList(); }
+      }
+      return;
+    }
+    if (ui.action === 'open_map') {
+      openMapsModal('library');
+      setTimeout(function () { openMapsViewer(ui.map_id); }, 180);
+      return;
+    }
+    if (ui.action === 'confirm_delete') {
+      openMapsModal('library');
+      setTimeout(function () { deleteMap(ui.map_id); }, 220);
+    }
+  }
+
+  mapsBtn.addEventListener('click', function () { openMapsModal('library'); });
+  mapsClose.addEventListener('click', closeMapsModal);
+  $('#mapsDone').addEventListener('click', closeMapsModal);
+  mapsModal.addEventListener('click', function (e) {
+    if (e.target === mapsModal) closeMapsModal();
+  });
+  $('#mapsRefresh').addEventListener('click', function () { loadMapsPanel(); loadPermissionsPanel(); });
+  document.querySelectorAll('#mapsTabs .maps-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () { activateMapsTab(tab.dataset.mapsTab); });
+  });
+  $('#mapsFilter').addEventListener('input', renderMapsList);
+  $('#mapsUrlDownload').addEventListener('click', startUrlDownload);
+  $('#mapsViewerBack').addEventListener('click', closeMapsViewer);
+  $('#mapsUploadCancel').addEventListener('click', cancelMapsUpload);
+  $('#mapsSettingsBtn').addEventListener('click', function () {
+    closeMapsModal();
+    currentTab = 'maps';
+    openModal();
+  });
+  $('#mapsOpenBtn').addEventListener('click', function () {
+    settingsModal.hidden = true;
+    stopDownloadPolling();
+    openMapsModal('library');
+  });
+  $('#mapsPermRefresh').addEventListener('click', loadPermissionsPanel);
+  $('#permCacheClear').addEventListener('click', clearPermissionsCache);
+
+  (function () {
+    let drop = $('#mapsDrop');
+    let input = $('#mapsFile');
+    if (!drop || !input) return;
+    drop.addEventListener('click', function () { input.click(); });
+    drop.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+    });
+    ['dragenter', 'dragover'].forEach(function (name) {
+      drop.addEventListener(name, function (e) {
+        e.preventDefault();
+        drop.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'dragend', 'drop'].forEach(function (name) {
+      drop.addEventListener(name, function (e) {
+        e.preventDefault();
+        drop.classList.remove('dragover');
+      });
+    });
+    drop.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        startMapsUpload(e.dataTransfer.files[0]);
+      }
+    });
+    input.addEventListener('change', function () {
+      if (input.files && input.files[0]) startMapsUpload(input.files[0]);
+      input.value = '';
+    });
+  })();
+
   /* fecha menus/modal com clique fora ou Escape */
   document.addEventListener('click', function (e) {
     modelMenu.classList.remove('open');
@@ -1203,6 +2080,7 @@
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
+      closeMapsModal();
       closeKnowledgeModal();
       closeModal();
       closeAttach();
@@ -1306,6 +2184,17 @@
         main.appendChild(t);
         main.appendChild(time);
         li.appendChild(main);
+        let ren = document.createElement('button');
+        ren.className = 'hist-rename';
+        ren.type = 'button';
+        ren.title = 'Renomear conversa';
+        ren.setAttribute('aria-label', 'Renomear conversa');
+        ren.innerHTML = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4L18 10l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>';
+        ren.addEventListener('click', function (e) {
+          e.stopPropagation();
+          renameWorkspace(ws.name);
+        });
+        li.appendChild(ren);
         let del = document.createElement('button');
         del.className = 'hist-del';
         del.type = 'button';
@@ -1334,6 +2223,24 @@
         loadHistory();
       })
       .catch(function () { });
+  }
+  function renameWorkspace(name) {
+    let next = window.prompt('Novo nome da conversa:', name);
+    if (next === null) return;
+    next = next.trim();
+    if (!next || next === name) return;
+    api('/workspaces/' + encodeURIComponent(name), {
+      method: 'PUT',
+      body: JSON.stringify({ new_name: next })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('rename');
+      return r.json();
+    }).then(function (data) {
+      if (currentWorkspace === name) currentWorkspace = data.new_name || next;
+      loadHistory();
+    }).catch(function () {
+      alert('Não foi possível renomear. Verifique se o nome não está vazio, não contém / ou \\ e não repete outra conversa.');
+    });
   }
   function openWorkspace(name) {
     currentWorkspace = name;
@@ -1517,6 +2424,8 @@
         try {
           let obj = JSON.parse(payload);
           if (obj && typeof obj.error === 'string') throw new Error(obj.error);
+          // Eventos de interface (ex.: abrir o painel de mapas) não são texto.
+          if (obj && obj.type === 'ui' && obj.ui) { handleMapUi(obj.ui); return; }
           // /api/chat sends {"t": "..."}; /api/agent/stream sends
           // {"type": "token", "text": "..."}.  Accept both shapes and never
           // render a JSON event (tool calls, finals, errors) as the answer.
@@ -1609,12 +2518,19 @@
 
   function scrollThread() { thread.scrollTop = thread.scrollHeight; }
 
+  function newWorkspaceName() {
+    let stamp = new Date().toLocaleString('pt-BR')
+      .replace(/[^\w\- .]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return 'Conversa ' + stamp;
+  }
+
   function ensureWorkspace() {
     if (currentWorkspace) return Promise.resolve(currentWorkspace);
     // The workspace name becomes part of an API path, so keep it to the
     // characters accepted by the backend (letters, digits, space, - and .).
-    let stamp = new Date().toLocaleString('pt-BR').replace(/[^\w\- .]/g, '-');
-    let name = 'Conversa ' + stamp;
+    let name = newWorkspaceName();
     return api('/workspaces', { method: 'POST', body: JSON.stringify({ name: name }) })
       .then(function (r) { return r.json(); })
       .then(function (r) {
@@ -1656,7 +2572,7 @@
 
   /*  novo chat   */
   $('#newChatBtn').addEventListener('click', function () {
-    let name = 'Conversa ' + new Date().toLocaleString('pt-BR');
+    let name = newWorkspaceName();
     api('/workspaces', { method: 'POST', body: JSON.stringify({ name: name }) })
       .then(function (r) { return r.json(); })
       .then(function (r) {
