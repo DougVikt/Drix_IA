@@ -11,9 +11,11 @@
 - **Optimized model switch** — single write to config + background preload
 - **Informative startup** — active vs. suggested model, last used model, network permissions
 - **Updated web UI** — new layout, complete settings panel and stop page
+- **Linux support** — `start.sh` + `scripts/install_linux.sh`, cross-platform paths,
+  bundled or system Ollama and clean SIGTERM shutdown (`core/platform_paths.py`)
 
 ## Security
-- API keys: **env var > local vault (DPAPI) > legacy config** — never plaintext in `config.yaml`
+- API keys: **env var > local vault (DPAPI on Windows, `0600` file on Linux) > legacy config** — never plaintext in `config.yaml`
 - Vault `data/secrets.json` hidden; keys registered via web go to the vault
 - API key auth + `HttpOnly`/`SameSite=Strict` cookie, same-origin CSRF, rate limit and SSRF blocking
 

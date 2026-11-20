@@ -25,12 +25,13 @@
 | File/folder | Purpose |
 |-------------|---------|
 | `config/config.yaml` | Main configuration (read at boot, partially reloaded) |
-| `data/secrets.json` | Secrets vault (DPAPI on Windows, hidden) |
+| `data/secrets.json` | Secrets vault (DPAPI on Windows, `0600` local file on Linux/macOS) |
 | `data/runtime.json` | Runtime state (indicator, pids, ports) |
 | `data/conversations.db` | Conversation history (terminal) |
 | `data/web_conversations.db` | Conversation history (web) |
 | `data/knowledge/` | Documents uploaded to the knowledge base |
 | `data/knowledge_db/` | Knowledge base SQLite index |
+| `data/maps/` | Offline map catalog and `.pmtiles` files (see [`MAPS.md`](./MAPS.md)) |
 | `data/vector_db/` | Legacy RAG memory (Chroma) — do not delete |
 | `data/lessons/` | Memory/learning — do not delete |
 | `logs/drix.log` | Service log |
@@ -129,6 +130,12 @@ knowledge:
   context_chars: 1800
 ```
 
+- Accepted formats: **PDF, DOCX, TXT, MD/Markdown, HTML/HTM, CSV and JSON**.
+- Legacy `.doc` is **not** supported; convert it to `.docx` first.
+- PDF extraction uses `pypdf`; DOCX uses `docx2txt`. If a reader is missing, the document stays listed with an actionable error.
+- Originals stay in `knowledge.dir/files`; the SQLite index is in `knowledge.db`. The index stores paths **relative to `knowledge.dir`** (for example `files/<stored_name>`), so the base keeps working after moving the project to another disk, another PC or Linux. Legacy absolute paths are migrated automatically when the list is read.
+- Uploads are indexed in a background thread (`queued` → `indexing` → `ready`/`error`). Search uses Ollama embeddings and falls back to keyword ranking when the engine is offline.
+
 ### `downloads` — Media downloads
 
 ```yaml
@@ -140,6 +147,29 @@ downloads:
   proxy: ''
   cookies: ''                 # path to cookies.txt
 ```
+
+### `maps` — Offline maps
+
+```yaml
+maps:
+  enabled: true
+  dir: ./data/maps
+  source_url: https://build.protomaps.com/20261118.pmtiles
+  max_parallel_downloads: 1   # reserved; this version runs one job at a time
+  allow_private_hosts: false  # true only for local mirrors (http/private IPs)
+```
+
+- `dir` must resolve inside the Drix root; outside paths are ignored and
+  `data/maps` is used. `~`, `$VAR`, `${VAR}` and `%VAR%` are expanded on both
+  Windows and Linux.
+- `source_url` is the full-planet PMTiles build used by presets and extraction.
+- Regional extraction needs the `pmtiles` CLI in `ia_system/bin/` (or `PATH`):
+  `pmtiles.exe` on Windows, `pmtiles` on Linux/macOS. URL downloads and local
+  imports do not need it.
+- `allow_private_hosts` also allows plain `http://` URLs. Keep it `false`
+  unless you use a local mirror; the host is checked again after redirects.
+- Presets and aliases live in `config/maps_presets.yaml`. Full guide:
+  [`MAPS.md`](./MAPS.md).
 
 ### `memory` — Memory and consolidation
 
@@ -198,13 +228,21 @@ security:
    $env:DRIX_SECURITY_API_KEY = "generate-with-openssl-or-python"
    $env:DRIX_OPENAI_API_KEY = "sk-..."
    ```
-3. Or use the **local vault** (`data/secrets.json`, DPAPI on Windows, hidden): keys registered on the web (`POST /api/providers/config`) go to the vault, never to the YAML.
+   ```bash
+   export DRIX_SECURITY_API_KEY="generate-with-openssl-or-python"
+   export DRIX_OPENAI_API_KEY="sk-..."
+   ```
+3. Or use the **local vault** (`data/secrets.json`; DPAPI on Windows, `0600` local file
+   with base64 obfuscation on Linux/macOS): keys registered on the web
+   (`POST /api/providers/config`) go to the vault, never to the YAML.
 4. To remove a saved key: `DELETE /api/providers/{provider}/key` (or Settings panel → providers).
 5. Effective priority: **env var > vault > legacy config**.
 6. Extra security:
    - Cookie `HttpOnly` + `SameSite=Strict`.
    - CSRF: `Sec-Fetch-Site` same-origin or matching `Origin`/`Referer`.
    - `web.host: 127.0.0.1` by default — for LAN, use HTTPS + stronger auth + firewall.
+   - On Linux the vault file is created with mode `0600`; it is not encrypted with a
+     machine key, so keep `data/` out of backups/sync services you do not trust.
 
 ## Network and SSRF blocking
 
@@ -228,9 +266,31 @@ Each tool has `allow`, `ask` or `deny` in `tools.permissions`:
 | `download_info/status/list/cancel` | `allow` | Metadata/control |
 | `knowledge_search` | `allow` | Local base search |
 | `knowledge_list` | `allow` | List documents |
+| `maps_list/info/status/search/open` | `allow` | Local map catalog and viewer |
+| `maps_download`, `maps_extract` | `ask` | Network and disk; confirmation before starting |
+| `maps_delete` | `ask` | Deletes the local `.pmtiles` file |
 | `snapshot_restore` | `allow` | Restore |
 
 Change via the **Tools** tab in settings or in `config.yaml`.
+
+`tools.default_permission` is `ask`: tools without an explicit rule prompt
+before running. When the user chooses **remember**, the decision is stored
+outside the project, keyed by a hash of the tool arguments:
+
+- Windows: `%LOCALAPPDATA%\Drix\permissions.json`
+- Linux/macOS: `~/.cache/drix/permissions.json` (or `$XDG_CACHE_HOME/drix`)
+
+The cache contains the tool name, the argument hash and a redacted preview; no
+secrets. Explicit rules in `config.yaml` always win over the cache. Manage
+entries in **Settings → Tools** or with
+`GET/POST/DELETE /api/permissions/cache`.
+
+### Allowed folders and path expansion
+
+`security.allowed_folders` accepts `~`, `$VAR`, `${VAR}` and Windows-style `%VAR%`.
+On Linux, `%USERPROFILE%` is mapped to `$HOME`, so the default
+`%USERPROFILE%/Desktop` keeps working without editing the config. Paths are
+resolved relative to the project root when they are not absolute.
 
 ## Configuration via the web UI
 
@@ -242,6 +302,7 @@ Change via the **Tools** tab in settings or in `config.yaml`.
 - **Tools:** per-tool permissions and step limit.
 - **Downloads:** enable, folder, concurrent, proxy, cookies, ffmpeg.
 - **Knowledge:** enable, limits, chunk, top_k, context.
+- **Maps:** enable, folder, source build, private hosts, storage/usage and remembered permissions.
 - **System:** status, logs, runtime, stop.
 
 Changes via web go through `POST /api/settings` (validates and coerces values) and `POST /api/providers/config` (saves keys to the vault, never to the YAML).
@@ -261,6 +322,10 @@ operation:
 
 ```powershell
 $env:OPENAI_API_KEY = "sk-..."
+```
+
+```bash
+export OPENAI_API_KEY="sk-..."
 ```
 
 ### Use remote Ollama (LAN)
@@ -288,18 +353,20 @@ The independent knowledge base lives in `data/knowledge_db/`.
 ## Verification and troubleshooting
 
 ```powershell
-# Test config.yaml is valid
+# Windows
 python -c "import yaml; print(yaml.safe_load(open(r'F:\config\config.yaml')))"
-
-# List saved keys (names, not values)
 python -c "import sys; sys.path.insert(0,r'F:\'); import core.secrets as s; print(s.list_secret_names())"
-
-# Check ports
 Test-NetConnection 127.0.0.1 -Port 8000
 Test-NetConnection 127.0.0.1 -Port 11434
-
-# Logs
 Get-Content F:\logs\drix.log -Tail 30
+```
+
+```bash
+# Linux
+.venv/bin/python -c "import yaml; print(yaml.safe_load(open('config/config.yaml')))"
+.venv/bin/python -c "import sys; sys.path.insert(0,'.'); import core.secrets as s; print(s.list_secret_names())"
+ss -ltnp | grep -E ':(8000|11434)\b'
+tail -n 30 logs/drix.log
 ```
 
 | Symptom | Cause | Fix |
@@ -309,6 +376,11 @@ Get-Content F:\logs\drix.log -Tail 30
 | Web does not open | Error in `web_app.py` | Check `logs/drix.log`, restart service |
 | Download fails | SSRF/network | Allow domain in `allowed_domains` |
 | Knowledge base empty | Missing embeddings | Start Ollama and pull `nomic-embed-text` |
+| Map extraction fails | `pmtiles` CLI missing | Put `pmtiles`/`pmtiles.exe` in `ia_system/bin/` or `PATH` |
+| Map panels disabled | `maps.enabled: false` | Enable in Settings → Maps or `config.yaml` |
+| Map download rejected | Private host or `http://` | Use HTTPS or enable `maps.allow_private_hosts` |
+| Map opens without tiles | Vendor/glyph assets missing | Restore `ui/front/vendor/` and `ui/front/map-assets/` |
+| `409` during map import | Import offset changed | Resume from the returned `offset` (the UI does this) |
 
 ---
 
