@@ -35,6 +35,7 @@ import uuid
 from pathlib import Path
 
 from . import logs, tools
+from . import platform_paths
 
 _ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DIR = _ROOT / "data" / "knowledge"
@@ -77,11 +78,7 @@ def _setting(name: str, default=None):
 
 
 def _expand(path: str) -> Path:
-    text = os.path.expandvars(os.path.expanduser(str(path or "").strip()))
-    target = Path(text)
-    if not target.is_absolute():
-        target = _ROOT / target
-    return target
+    return platform_paths.expand_path(path, base=_ROOT)
 
 
 def default_dir() -> Path:
@@ -108,6 +105,64 @@ def _index_path() -> Path:
     folder = default_dir()
     folder.mkdir(parents=True, exist_ok=True)
     return folder / "index.json"
+
+
+def _relative_path(path: Path) -> str:
+    """Grava o caminho relativo a ``knowledge.dir``; fora dela, absoluto.
+
+    O caminho relativo é portável entre PCs e entre Windows/Linux.  Usamos
+    ``as_posix()`` para gravar sempre ``files/arquivo`` com barra normal.
+    """
+    base = default_dir().resolve()
+    try:
+        return path.resolve().relative_to(base).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _resolve_path(record: dict) -> Path:
+    """Resolve o original na pasta atual, mesmo se o projeto mudou de disco.
+
+    Registros novos guardam ``files/<stored_name>`` relativo a
+    ``knowledge.dir``.  Registros antigos podem ter caminho absoluto
+    (ex.: ``D:\\data\\knowledge\\files\\...``); nesse caso o ``stored_name``
+    resolve o arquivo na pasta configurada hoje.
+    """
+    stored_name = Path(str(record.get("stored_name") or "").strip()).name
+    raw = str(record.get("path") or "").strip()
+    candidates: list[Path] = []
+    if raw:
+        candidate = Path(raw)
+        candidates.append(candidate if candidate.is_absolute()
+                          else default_dir() / candidate)
+    if stored_name:
+        candidates.append(_files_dir() / stored_name)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else _files_dir() / stored_name
+
+
+def migrate_paths() -> int:
+    """Converte caminhos absolutos antigos em relativos, sem perder dados."""
+    with _LOCK:
+        meta = _read_meta()
+        docs = meta.get("documents") or {}
+        changed = 0
+        for record in docs.values():
+            raw = str(record.get("path") or "").strip()
+            if not raw or not Path(raw).is_absolute():
+                continue
+            resolved = _resolve_path(record)
+            if not resolved.exists():
+                continue
+            relative = _relative_path(resolved)
+            if relative != raw:
+                record["path"] = relative
+                changed += 1
+        if changed:
+            _write_meta(meta)
+        return changed
 
 
 def _enabled() -> bool:
@@ -247,6 +302,7 @@ def _available() -> bool:
 
 
 def list_documents(limit: int = 200) -> list[dict]:
+    migrate_paths()
     with _LOCK:
         docs = list((_read_meta().get("documents") or {}).values())
     docs.sort(key=lambda item: str(item.get("added_at") or ""), reverse=True)
@@ -489,8 +545,9 @@ def _index_document(doc_id: str) -> None:
         record["status"] = "indexing"
         record["error"] = ""
         record["updated_at"] = _now()
+        path = _resolve_path(record)
+        record["path"] = _relative_path(path)
         _save_record(record)
-        path = Path(record.get("path") or "")
 
     try:
         if not path.exists():
@@ -594,7 +651,7 @@ def add_document(filename: str, data: bytes) -> dict:
             "id": doc_id,
             "name": name,
             "stored_name": stored,
-            "path": str(dest),
+            "path": _relative_path(dest),
             "size": len(data),
             "sha256": digest,
             "ext": ext,
@@ -668,7 +725,7 @@ def delete_document(doc_id: str) -> bool:
         _CANCELLED.add(doc_id)
     _delete_vectors(doc_id)
     try:
-        path = Path(record.get("path") or "")
+        path = _resolve_path(record)
         if path.exists() and path.is_file():
             path.unlink()
     except Exception as exc:
